@@ -4,12 +4,19 @@
     "slug": "Memo_trip",
     "version": "1.0.0",
     "orientation": "portrait",
-    "icon": "./assets/images/icon.png",
+    "icon": "./assets/images/MemoTrip_Logo.png",
     "scheme": "memotrip",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "bundleIdentifier": "com.roytentzer.memotrip",
+      "config": {
+        "googleMapsApiKey": "AIzaSyATswmwEuFQvLI9ixSJSF3pUVABYe8CTow"
+      },
+      "infoPlist": {
+        "NSLocationWhenInUseUsageDescription": "MemoTrip needs your location to show where you've traveled."
+      }
     },
     "android": {
       "adaptiveIcon": {
@@ -38,7 +45,8 @@
             "backgroundColor": "#000000"
           }
         }
-      ]
+      ],
+      "expo-web-browser"
     ],
     "experiments": {
       "typedRoutes": true,
