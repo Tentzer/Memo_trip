@@ -303,4 +303,3 @@ export default function MapScreen() {
         </View>
     );
 }
-// IF YOU READ THIS YOU GAY
