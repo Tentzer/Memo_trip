@@ -44,3 +44,4 @@ app-example
 
 .env
 app.json
+lib/supabase.ts
