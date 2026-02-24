@@ -18,13 +18,13 @@
 
 ## 🖼️ Preview
 
-|                  Logo                  |               Entry               |
-|:--------------------------------------:|:---------------------------------:|
-| ![Home](Screenshots/MemoTrip_Logo.png) | ![Gallery](Screenshots/Main.jpeg) |
+|                     Logo                      |               Entry               |
+|:---------------------------------------------:|:---------------------------------:|
+| ![Home](assets/Screenshots/MemoTrip_Logo.png) | ![Gallery](assets/Screenshots/Main.jpeg) |
 
 |         Polaroid Markers         |             Settings Menu              |
 |:--------------------------------:|:--------------------------------------:|
-| ![Markers](Screenshots/map.jpeg) | ![Settings](Screenshots/Settings.jpeg) |
+| ![Markers](assets/Screenshots/map.jpeg) | ![Settings](assets/Screenshots/Settings.jpeg) |
 > **Tip:** Replace the placeholder links above with your actual screenshot URLs once you upload them to GitHub!
 
 ---
