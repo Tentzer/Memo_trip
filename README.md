@@ -22,9 +22,9 @@
 |:---------------------------------------------:|:---------------------------------:|
 | ![Home](assets/Screenshots/MemoTrip_Logo.png) | ![Gallery](assets/Screenshots/Main.jpeg) |
 
-|         Polaroid Markers         |             Settings Menu              |
-|:--------------------------------:|:--------------------------------------:|
-| ![Markers](assets/Screenshots/map.jpeg) | ![Settings](assets/Screenshots/Settings.jpeg) |
+|            Polaroid Markers             |             Settings Menu              |
+|:---------------------------------------:|:--------------------------------------:|
+| ![Markers](assets/Screenshots/Map.jpeg) | ![Settings](assets/Screenshots/Settings.jpeg) |
 > **Tip:** Replace the placeholder links above with your actual screenshot URLs once you upload them to GitHub!
 
 ---
