@@ -24,7 +24,7 @@ export default function LoginScreen() {
         if (error) {
             Alert.alert("Login Failed", error.message);
         } else {
-            router.replace('/onboarding');
+            router.replace('/onboarding/Home');
         }
         setLoading(false);
     }

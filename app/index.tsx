@@ -1,13 +1,23 @@
-import React, { useRef } from 'react';
+import React, {useEffect, useRef} from 'react';
 import { View, Text, TextInput, TouchableOpacity, SafeAreaView } from 'react-native';
 import LottieView from 'lottie-react-native';
-import {Link} from "expo-router";
+import {Link, router} from "expo-router";
 import { useState } from 'react';
+import {useAuth} from "@/context/AuthContext";
 
 
 
 export default function HomeScreen() {
     const animation = useRef<LottieView>(null);
+    const auth = useAuth();
+
+    useEffect(() => {
+        if (!auth.loading) {
+            if (auth.user) {
+                router.replace("./onboarding/Home");
+            }
+        }
+    }, [auth.user, auth.loading]);
 
     return (
         <View className="flex-1 justify-between items-center bg-slate-700 py-10">
@@ -48,7 +58,7 @@ export default function HomeScreen() {
                 </Link>
 
                 {/* Button 3 */}
-                <Link href="/onboarding" asChild>
+                <Link href="../onboarding/Home" asChild>
                     <TouchableOpacity className="bg-blue-500 py-2 w-60 rounded-xl shadow-md active:bg-blue-600">
                         <Text className="text-white text-lg font-bold text-center">Admin</Text>
                     </TouchableOpacity>
