@@ -1,27 +1,20 @@
 import {
-    Dimensions,
     View,
     ActivityIndicator,
     Text,
     TouchableOpacity,
     TextInput,
-    Keyboard,
     Image,
-    Alert,
     Switch,
     StyleSheet, Modal, SafeAreaView, FlatList
 } from 'react-native';
 import MapView, {PROVIDER_GOOGLE, Marker, Polyline} from 'react-native-maps';
-import React, {useEffect, useRef, useState} from 'react';
-import * as Location from 'expo-location'; //
+import React, {useEffect, useState} from 'react';
 import {Ionicons} from '@expo/vector-icons';
-import polyline from '@mapbox/polyline';
-import {router, Tabs} from "expo-router";
-import { useMemories } from '../../context/MemoryContext';
-import { Memory } from '../../context/MemoryContext';
-import { useMapLogic } from '../../hooks/useMapLogic';
-import {inspect} from "node:util";
-import { useAuth } from '../../context/AuthContext';
+import {router} from "expo-router";
+import { useMemories } from '@/context/MemoryContext';
+import { useMapLogic } from '@/hooks/useMapLogic';
+import { useAuth } from '@/context/AuthContext';
 
 const darkMapStyle = [
     {
@@ -398,7 +391,7 @@ export default function MapScreen() {
         destination_latitue, destination_longtitude, route_coordinates,
         show_route, show_SearchingBar, map_Moved, userChooseAdress, routeDistance,showMemories,isGalleryVisible,
         setSearchQuery, setMapMoved, fetchPlaces, handleSelectPlace,
-        GetPlaceRoute, handleMarkerPress, handleStopRoute, returnToStartingPoint,
+        GetPlaceRoute, handleMarkerPress, returnToStartingPoint,
         setShowRoute, setShowSearchingBar, setUserChooseAdress, setRouteDistance , setDestinationlongtitude, setDestinationlatitue,setShowMemories,setIsGalleryVisible,
         jumpToLocation,
     } = useMapLogic(deleteMemory);
@@ -617,11 +610,6 @@ export default function MapScreen() {
 
                     {showMemories && memories.map((memory, index) => {
                         const rotation = (index % 2 === 0 ? 2 : -2);
-
-                        // Fallback logic for the date
-                        const displayDate = memory.created_at
-                            ? new Date(memory.created_at).toLocaleDateString()
-                            : new Date().toLocaleDateString();
 
                         return (
                             <Marker
