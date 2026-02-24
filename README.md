@@ -18,10 +18,13 @@
 
 ## 🖼️ Preview
 
-| Home Screen | Memory Gallery | Polaroid Markers |
-| :---: | :---: | :---: |
-| ![Home Screen](https://via.placeholder.com/300x600?text=Map+View) | ![Gallery View](https://via.placeholder.com/300x600?text=Gallery+View) | ![Marker Detail](https://via.placeholder.com/300x600?text=Polaroid+Markers) |
+|             Logo              |              Entry               |
+|:-----------------------------:|:--------------------------------:|
+| ![Home](Screenshots/home.png) | ![Gallery](Screenshots/Main.png) |
 
+| Polaroid Markers |             Settings Menu             |
+| :---: |:-------------------------------------:|
+| ![Markers](Screenshots/map.png) | ![Settings](Screenshots/Settings.png) |
 > **Tip:** Replace the placeholder links above with your actual screenshot URLs once you upload them to GitHub!
 
 ---
