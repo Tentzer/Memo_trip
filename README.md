@@ -38,21 +38,17 @@
 
 ---
 
-## 🚀 Getting Started
+---
 
-### 1. Prerequisites
-* Node.js & npm/yarn
-* Expo Go app on your physical device
-* Google Maps API Key
-* Supabase Project URL & Anon Key
+## 🛠️ Roadmap & Future Features
 
-### 2. Installation
-```bash
-# Clone the repository
-git clone [https://github.com/YOUR_USERNAME/memo_trip.git](https://github.com/YOUR_USERNAME/memo_trip.git)
+I am actively developing **Memo_trip** to turn it from a personal scrapbook into a collaborative travel platform. Upcoming milestones include:
 
-# Install dependencies
-npm install
-
+* **Social Memory Sharing:** Implement a "cloning" system where users can invite friends via email to copy a specific memory directly into their own map database.
+* **Collaborative Trips:** Shared map layers where multiple users can contribute photos to the same trip itinerary in real-time.
+* **Media Support:** Expand beyond static photos to include short video "Memory Clips" and voice memos attached to markers.
+* **Advanced Filtering:** Ability to filter memories by date ranges, "Trip Folders," or specific travelers.
+* **Push Notifications:** Alerts for when a friend shares a new memory with you or when you are physically near a "Saved Memory" location.
+* **Offline Mode:** Local caching of map tiles and memories for travelers exploring areas with limited data connectivity.
 
 
