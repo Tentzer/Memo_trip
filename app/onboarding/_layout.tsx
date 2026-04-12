@@ -1,9 +1,6 @@
-import { Stack,Tabs } from "expo-router";
-import {Ionicons} from "@expo/vector-icons";
-import {AntDesign} from '@expo/vector-icons';
-import * as ImagePicker from 'expo-image-picker';
-import * as Location from 'expo-location';
-import { View, TouchableOpacity, Text, Image, Alert } from 'react-native';
+import { Tabs } from "expo-router";
+import { Ionicons } from "@expo/vector-icons";
+import { AntDesign } from '@expo/vector-icons';
 import { useMemories } from '../../context/MemoryContext';
 
 export default function OnboardingLayout() {
@@ -12,10 +9,10 @@ export default function OnboardingLayout() {
     return (
         <Tabs screenOptions={{ tabBarActiveTintColor: '#3B82F6' }}>
             <Tabs.Screen
-                name="index"
+                name="Home"
                 options={{
                     title: "Map",
-                    tabBarIcon: ({ color }) => <Ionicons name="map" size={24} color={color} />,
+                    tabBarIcon: ({ color }) => <Ionicons name="home" size={24} color={color} />,
                 }}
             />
             <Tabs.Screen

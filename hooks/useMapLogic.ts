@@ -1,10 +1,11 @@
-import { useState, useEffect, useRef } from 'react';
-import { Keyboard, Alert } from 'react-native';
+import React, { useState, useEffect, useRef } from 'react';
+import {Keyboard, Alert, Linking, SafeAreaView, View, Text, TouchableOpacity, FlatList, Image, Modal} from 'react-native';
 import * as Location from 'expo-location';
 import MapView from 'react-native-maps';
 import polyline from '@mapbox/polyline';
 import { Memory } from '../context/MemoryContext';
 import {supabase} from "@/lib/supabase";
+import {Ionicons} from "@expo/vector-icons";
 
 interface Coordinates {
     latitude: number;
@@ -20,7 +21,10 @@ const decodePolyline = (encoded: string) => {
     }));
 };
 
-export const useMapLogic = (deleteMemory: (id: string) => void) => {
+export const useMapLogic = (
+    deleteMemory: (id: string) => void,
+    onInfoPress?: (memory: Memory) => void
+) => {
 
     const mapRef = useRef<MapView>(null);
     const [location, setLocation] = useState<Location.LocationObject | null>(null);
@@ -37,6 +41,10 @@ export const useMapLogic = (deleteMemory: (id: string) => void) => {
     const [routeDistance, setRouteDistance] = useState<string>('');
     const [showMemories, setShowMemories] = useState<boolean>(true);
     const [isGalleryVisible, setIsGalleryVisible] = useState<boolean>(false);
+    const [isShareMemoryVisible, setIsShareMemoryVisible] = useState<boolean>(false);
+    const [memoryToShare, setMemoryToShare] = useState<Memory | null>(null);
+    const [shareEmail, setShareEmail] = useState<string>('');
+    const [isDarkMode, setIsDarkMode] = useState(false);
 
     const GOOGLE_API_KEY = process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY;
 
@@ -123,6 +131,31 @@ export const useMapLogic = (deleteMemory: (id: string) => void) => {
         }
     };
 
+    const openDrivingInWaze = async (lat?: number, lng?: number) => {
+        const finalLat = lat !== undefined ? lat : destination_latitue;
+        const finalLng = lng !== undefined ? lng : destination_longtitude;
+
+        if (!finalLat || !finalLng) {
+            Alert.alert('No destination selected');
+            return;
+        }
+
+        const wazeDeepLink = `waze://?ll=${finalLat},${finalLng}&navigate=yes`;
+        const wazeWebLink = `https://waze.com/ul?ll=${finalLat},${finalLng}&navigate=yes`;
+
+        try {
+            const canOpenWaze = await Linking.canOpenURL(wazeDeepLink);
+            if (canOpenWaze) {
+                await Linking.openURL(wazeDeepLink);
+                return;
+            }
+
+            await Linking.openURL(wazeWebLink);
+        } catch (error) {
+            Alert.alert('Could not open navigation app');
+        }
+    };
+
     const handleStopRoute = () => {
         setShowRoute(false);
         returnToStartingPoint();
@@ -137,6 +170,7 @@ export const useMapLogic = (deleteMemory: (id: string) => void) => {
         setDestinationlatitue(memory.latitude);
         setDestinationlongtitude(memory.longitude);
         setUserChooseAdress(false);
+        setMemoryToShare(memory);
 
         Alert.alert(
             "Memo Options",
@@ -147,13 +181,41 @@ export const useMapLogic = (deleteMemory: (id: string) => void) => {
                 {
                     text: "Route",
                     onPress: () => {
-                        GetPlaceRoute(memory.latitude, memory.longitude);
-                        setShowRoute(true);
-                        returnToStartingPoint();
-                        setShowSearchingBar(false);
+                        Alert.alert(
+                            'Choose route type',
+                            'How would you like to navigate?',
+                            [
+                                { text: 'Cancel', style: 'cancel' },
+                                {
+                                    text: 'Walk',
+                                    onPress: () => {
+                                        GetPlaceRoute(memory.latitude, memory.longitude);
+                                        setShowRoute(true);
+                                        returnToStartingPoint();
+                                        setShowSearchingBar(false);
+                                    },
+                                },
+                                {
+                                    text: 'Drive with Waze',
+                                    onPress: () => {
+                                        openDrivingInWaze(memory.latitude, memory.longitude);
+                                    },
+                                },
+                            ]
+                        );
                     },
                     style: "default",
-                }
+                },
+                {
+                    text: "Info",
+                    onPress: () => {
+                        onInfoPress?.(memory);
+                    },
+                },
+                { text: "Share", onPress: () => {
+                    setIsShareMemoryVisible(true);
+                    setMemoryToShare(memory);
+                    } }
             ]
         );
     };
@@ -171,14 +233,13 @@ export const useMapLogic = (deleteMemory: (id: string) => void) => {
         }, 200);
     }
 
-
     return {
         mapRef, location, loading, searchQuery, google_result,
         destination_latitue, destination_longtitude, route_coordinates,
-        show_route, show_SearchingBar, map_Moved, userChooseAdress, routeDistance,showMemories,isGalleryVisible,
-        setShowMemories,
-        setSearchQuery, setMapMoved, fetchPlaces, handleSelectPlace,
-        GetPlaceRoute, handleMarkerPress, handleStopRoute, returnToStartingPoint,
+        show_route, show_SearchingBar, map_Moved, userChooseAdress, routeDistance,showMemories,isGalleryVisible,isShareMemoryVisible,memoryToShare,shareEmail,isDarkMode,
+        setShowMemories,setShareEmail,setIsDarkMode,
+        setSearchQuery, setMapMoved, fetchPlaces, handleSelectPlace,setIsShareMemoryVisible,
+        GetPlaceRoute, openDrivingInWaze, handleMarkerPress, handleStopRoute, returnToStartingPoint,setMemoryToShare,
         setShowRoute, setShowSearchingBar, setUserChooseAdress, setRouteDistance, setDestinationlatitue, setDestinationlongtitude,setIsGalleryVisible,jumpToLocation,
     };
 };
