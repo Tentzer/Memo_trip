@@ -43,4 +43,5 @@ app-example
 /android
 
 .env
-process.env
+app.json
+lib/supabase.ts
