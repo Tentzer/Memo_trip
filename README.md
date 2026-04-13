@@ -11,6 +11,18 @@ Mobile app for capturing geotagged photo memories, viewing them on a map, and or
 - **Sharing:** Share a single memory by email, or share a custom library with another user; incoming shares appear as shared library memories on the map.
 - **Auth:** Email/password sign-in via Supabase Auth; session handled in `AuthContext`. Entry stack: welcome → login/sign-up → onboarding tabs when signed in.
 
+## Screenshots (examples)
+
+Static examples from an earlier build (UI may differ slightly in the current app):
+
+| Logo | Map |
+|:---:|:---:|
+| <img src="assets/screenshots/MemoTrip_Logo.png" alt="Memo Trip logo" width="260" /> | <img src="assets/screenshots/Map.jpeg" alt="Map view with memories" width="260" /> |
+
+| Entry | Settings |
+|:---:|:---:|
+| <img src="assets/screenshots/Main.jpeg" alt="Welcome / entry" width="260" /> | <img src="assets/screenshots/Settings.jpeg" alt="Settings sheet" width="260" /> |
+
 ## App structure (high level)
 
 | Area | Notes |
