@@ -1,54 +1,56 @@
-# 📸 Memo_trip
-### *Your Journey, Captured on the Map.*
+# Memo Trip
 
-**Memo_trip** is a mobile travel scrapbook that turns your photos into an interactive map. Instead of scrolling through a flat gallery, you can see exactly where your memories happened, relive your routes, and manage your travel highlights in a custom "Scrapbook" style.
+Mobile app for capturing geotagged photo memories, viewing them on a map, and organizing them in libraries. Built with **Expo (SDK 54)**, **React Native**, and **Supabase**.
 
----
+## What it does
 
-## ✨ Features
+- **Map (Home):** Interactive map (`react-native-maps`, Google provider) with thumbnail markers for your memories and for memories shared via **shared libraries** (viewer role). Optional dark map styling from settings.
+- **Places:** Search with Google Places, preview a walking route to a selected place, and save a place as a memory (including optional description when no place photo exists).
+- **Camera:** **Take Photo** tab launches the camera (`expo-image-picker`); new shots are geotagged and synced to Supabase storage and the `memories` table.
+- **Libraries:** Country-based grouping plus **custom folders** (Supabase `libraries` / `library_memos` / `library_members`). Open **My Memos** from settings for a folder-first library UI; **Show on map** filters markers to a folder.
+- **Sharing:** Share a single memory by email, or share a custom library with another user; incoming shares appear as shared library memories on the map.
+- **Auth:** Email/password sign-in via Supabase Auth; session handled in `AuthContext`. Entry stack: welcome → login/sign-up → onboarding tabs when signed in.
 
-* **Scrapbook Map:** Photos appear as custom Polaroid-style markers with vintage date stamps and organic "tossed" tilts.
-* **Memory Gallery:** A dedicated "Memo Pics" slide-up gallery that organizes all your captures in a clean 3-column grid.
-* **Teleport Navigation:** Tap any photo in the gallery to "fly" the map directly to that memory's location.
-* **Travel Routing:** Get real-time walking directions from your current location to any saved memory using Google Maps API.
-* **Privacy-First:** Secure authentication and cloud storage powered by **Supabase**.
-* **Dark Mode:** A custom-designed "Dark Forest" map theme for nighttime exploring.
+## App structure (high level)
 
----
+| Area | Notes |
+|------|--------|
+| `app/` | Expo Router: `index` (welcome), `Login`, `SignUp`, `onboarding/` (tabs: `Home`, `info`, `TakePicture`) |
+| `components/` | `LibraryModal`, `SearchBar`, `SettingsSheet`, modals for memo info, sharing, place description |
+| `context/` | `AuthContext`, `MemoryProvider` (memories, folders, CRUD, sharing hooks) |
+| `hooks/` | `useMapLogic`, `useMemoryCRUD`, `useLibraries`, `useSharing` |
+| `lib/` | Supabase data loading (`memoryApi`), geocoding, routing (walking preview), local meta (`memoryStorage`) |
+| `assets/country-photos/` | Images used for country folder cards in the library UI |
 
-## 🖼️ Preview
+## Tech stack
 
-|                             Logo                             |                         Map                         |
-|:------------------------------------------------------------:|:---------------------------------------------------:|
-| <img src="assets/screenshots/MemoTrip_Logo.png" width="250"> | <img src="assets/screenshots/Map.jpeg" width="250"> |
+- **Runtime:** React 19, React Native 0.81, Expo ~54  
+- **Navigation:** Expo Router 6  
+- **UI:** NativeWind (Tailwind-style classes), `@gorhom/bottom-sheet` for settings  
+- **Map:** `react-native-maps` (Google Maps)  
+- **Images:** `expo-image`  
+- **Backend:** Supabase (JS client) for auth, Postgres, and storage  
+- **Language:** TypeScript  
+- **Lint:** `npm run lint` (Expo ESLint config)
 
-|                      Entry Menu                      |                      Settings Menu                       |
-|:----------------------------------------------------:|:--------------------------------------------------------:|
-| <img src="assets/screenshots/Main.jpeg" width="250"> | <img src="assets/screenshots/Settings.jpeg" width="250"> |
+## Setup
 
----
+1. **Dependencies:** `npm install`
+2. **Environment:** Create a `.env` (or use Expo’s env loading) with at least:
+   - `EXPO_PUBLIC_GOOGLE_MAPS_API_KEY` — required for map, Places, and directions features.
+3. **Supabase:** The repo expects a `lib/supabase.ts` Supabase client (this file is gitignored). Add your project URL and anon key there, and ensure tables/policies match your schema (memories, libraries, members, etc.).
+4. **Run:** `npm start` then open in Expo Go or a dev build (`npm run android` / `npm run ios`).
 
-## 🛠️ Tech Stack
+Native projects are not committed (`ios/` and `android/` are ignored); use Expo prebuild or EAS when you need standalone native folders.
 
-* **Frontend:** React Native (Expo)
-* **Styling:** NativeWind (Tailwind CSS)
-* **Map Engine:** React Native Maps & Google Maps API
-* **Backend/Database:** Supabase (Auth, PostgreSQL, Storage)
-* **Icons:** Expo Vector Icons (Ionicons)
+## Scripts
 
----
+| Command | Purpose |
+|---------|---------|
+| `npm start` | Expo dev server |
+| `npm run android` / `npm run ios` / `npm run web` | Platform targets |
+| `npm run lint` | ESLint |
 
----
+## Roadmap (directional)
 
-## 🛠️ Roadmap & Future Features
-
-I am actively developing **Memo_trip** to turn it from a personal scrapbook into a collaborative travel platform. Upcoming milestones include:
-
-* **Social Memory Sharing:** Implement a "cloning" system where users can invite friends via email to copy a specific memory directly into their own map database.
-* **Collaborative Trips:** Shared map layers where multiple users can contribute photos to the same trip itinerary in real-time.
-* **Media Support:** Expand beyond static photos to include short video "Memory Clips" and voice memos attached to markers.
-* **Advanced Filtering:** Ability to filter memories by date ranges, "Trip Folders," or specific travelers.
-* **Push Notifications:** Alerts for when a friend shares a new memory with you or when you are physically near a "Saved Memory" location.
-* **Offline Mode:** Local caching of map tiles and memories for travelers exploring areas with limited data connectivity.
-
-
+Ideas previously tracked for the product include richer collaboration, media beyond still photos, stronger offline behavior, and notification-driven sharing—treated as future work, not guarantees.
