@@ -48,12 +48,25 @@ Static examples from an earlier build (UI may differ slightly in the current app
 ## Setup
 
 1. **Dependencies:** `npm install`
-2. **Environment:** Create a `.env` (or use Expo’s env loading) with at least:
-   - `EXPO_PUBLIC_GOOGLE_MAPS_API_KEY` — required for map, Places, and directions features.
-3. **Supabase:** The repo expects a `lib/supabase.ts` Supabase client (this file is gitignored). Add your project URL and anon key there, and ensure tables/policies match your schema (memories, libraries, members, etc.).
-4. **Run:** `npm start` then open in Expo Go or a dev build (`npm run android` / `npm run ios`).
+2. **Environment:** Copy `.env.example` to `.env` and set:
+   - `EXPO_PUBLIC_SUPABASE_URL` / `EXPO_PUBLIC_SUPABASE_ANON_KEY` — Supabase project (used by `lib/supabase.ts`).
+   - `EXPO_PUBLIC_GOOGLE_MAPS_API_KEY` — map, Places, and directions (embed in native builds via `app.config.ts`).
+3. **Run:** `npm start`, then Expo Go or a dev build (`npm run android` / `npm run ios`).
 
-Native projects are not committed (`ios/` and `android/` are ignored); use Expo prebuild or EAS when you need standalone native folders.
+## iOS builds (EAS and TestFlight)
+
+The app is configured for **[EAS Build](https://docs.expo.dev/build/introduction/)** (`eas.json`, `app.config.ts`).
+
+1. **Apple Developer Program** account and an app record in App Store Connect (bundle ID must match `app.config.ts`: `com.roytentzer.memotrip` — change it there if you use another ID).
+2. **Log in:** `npx eas-cli login` (or use the local `eas-cli` from `npm install`).
+3. **Link the project:** `npx eas-cli build:configure` (once; creates/updates the Expo project on expo.dev).
+4. **Secrets for production builds:** In the [EAS dashboard](https://expo.dev/) or via `eas secret:create`, set the same `EXPO_PUBLIC_*` variables as in `.env` so cloud builds can read them.
+5. **Build for TestFlight:** `npm run eas:build:ios` (production profile: store distribution, suitable for TestFlight after processing).
+6. **Submit:** `npm run eas:submit:ios` or upload the `.ipa` with Transporter; then enable **TestFlight** testers in App Store Connect.
+
+Use `npm run eas:build:ios:preview` for **internal** (non–TestFlight) distribution only. See Expo’s iOS submission and TestFlight docs for the full checklist (signing, privacy labels, export compliance).
+
+Native `ios/` and `android/` folders are not committed; EAS Build generates them during the cloud build.
 
 ## Scripts
 
@@ -62,6 +75,8 @@ Native projects are not committed (`ios/` and `android/` are ignored); use Expo 
 | `npm start` | Expo dev server |
 | `npm run android` / `npm run ios` / `npm run web` | Platform targets |
 | `npm run lint` | ESLint |
+| `npm run eas:build:ios` | EAS production iOS build (TestFlight-ready) |
+| `npm run eas:submit:ios` | Submit latest EAS iOS build to App Store Connect |
 
 ## Roadmap (directional)
 
