@@ -1,7 +1,7 @@
+import { supabase } from '@/lib/supabase';
+import { useRouter } from "expo-router";
 import React, { useState } from 'react';
-import { View, Text, TextInput, TouchableOpacity, SafeAreaView, Alert, ActivityIndicator } from 'react-native';
-import {Link, useRouter} from "expo-router";
-import { supabase } from '../lib/supabase'; // Import the client you created
+import { ActivityIndicator, Alert, SafeAreaView, Text, TextInput, TouchableOpacity, View } from 'react-native';
 
 export default function LoginScreen() {
     const router = useRouter();
@@ -52,7 +52,7 @@ export default function LoginScreen() {
                 <TextInput
                     className="bg-slate-50 border border-slate-200 p-4 rounded-2xl text-slate-800"
                     placeholder="Your best password"
-                    keyboardType="visible-password"
+                    secureTextEntry
                     value={password}
                     onChangeText={setPassword}
                 />

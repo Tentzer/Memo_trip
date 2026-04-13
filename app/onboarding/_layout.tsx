@@ -1,10 +1,15 @@
-import { Tabs } from "expo-router";
-import { Ionicons } from "@expo/vector-icons";
-import { AntDesign } from '@expo/vector-icons';
+import { AntDesign, Ionicons } from "@expo/vector-icons";
+import { Redirect, Tabs } from "expo-router";
+import { useAuth } from '../../context/AuthContext';
 import { useMemories } from '../../context/MemoryContext';
 
 export default function OnboardingLayout() {
     const { addMemory } = useMemories();
+    const { user, loading } = useAuth();
+
+    if (!loading && !user) {
+        return <Redirect href="/" />;
+    }
 
     return (
         <Tabs screenOptions={{ tabBarActiveTintColor: '#3B82F6' }}>

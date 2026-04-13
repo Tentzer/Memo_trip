@@ -1,67 +1,82 @@
-import React, { useState, useEffect, useRef } from 'react';
-import {Keyboard, Alert, Linking, SafeAreaView, View, Text, TouchableOpacity, FlatList, Image, Modal} from 'react-native';
+import { useState, useRef, useCallback } from 'react';
+import { Keyboard, Alert, Linking } from 'react-native';
 import * as Location from 'expo-location';
 import MapView from 'react-native-maps';
-import polyline from '@mapbox/polyline';
 import { Memory } from '../context/MemoryContext';
-import {supabase} from "@/lib/supabase";
-import {Ionicons} from "@expo/vector-icons";
+import { useAuth } from '../context/AuthContext';
+import { getFolderNameFromGoogleAddressComponents, type GoogleAddressComponent } from '@/lib/geocoding';
+import { fetchWalkingRoutePreview } from '@/lib/routing';
 
 interface Coordinates {
     latitude: number;
     longitude: number;
 }
 
-// Utility for decoding polyline
-const decodePolyline = (encoded: string) => {
-    const points = polyline.decode(encoded);
-    return points.map(point => ({
-        latitude: point[0],
-        longitude: point[1],
-    }));
-};
+export interface PlacePrediction {
+    place_id: string;
+    description: string;
+    structured_formatting: {
+        main_text: string;
+        secondary_text: string;
+    };
+}
 
 export const useMapLogic = (
     deleteMemory: (id: string) => void,
+    addPlaceMemory: (
+        photoUri: string,
+        lat: number,
+        lng: number,
+        country: string,
+        description?: string
+    ) => Promise<void>,
     onInfoPress?: (memory: Memory) => void
 ) => {
 
     const mapRef = useRef<MapView>(null);
+    const locationRef = useRef<Location.LocationObject | null>(null);
     const [location, setLocation] = useState<Location.LocationObject | null>(null);
     const [loading, setLoading] = useState(true);
     const [searchQuery, setSearchQuery] = useState('');
-    const [google_result, SetGoogleResults] = useState([]);
-    const [destination_latitue, setDestinationlatitue] = useState<number>(0);
-    const [destination_longtitude, setDestinationlongtitude] = useState<number>(0);
-    const [route_coordinates, setRouteCoordinates] = useState<Coordinates[]>();
-    const [show_route, setShowRoute] = useState<boolean>(false);
-    const [show_SearchingBar, setShowSearchingBar] = useState<boolean>(true);
-    const [map_Moved, setMapMoved] = useState<boolean>(false);
-    const [userChooseAdress, setUserChooseAdress] = useState<boolean>(false);
-    const [routeDistance, setRouteDistance] = useState<string>('');
-    const [showMemories, setShowMemories] = useState<boolean>(true);
-    const [isGalleryVisible, setIsGalleryVisible] = useState<boolean>(false);
-    const [isShareMemoryVisible, setIsShareMemoryVisible] = useState<boolean>(false);
+    const [searchResults, setSearchResults] = useState<PlacePrediction[]>([]);
+    const [destinationLatitude, setDestinationLatitude] = useState(0);
+    const [destinationLongitude, setDestinationLongitude] = useState(0);
+    const [routeCoordinates, setRouteCoordinates] = useState<Coordinates[]>();
+    const [showRoute, setShowRoute] = useState(false);
+    const [showSearchBar, setShowSearchBar] = useState(true);
+    const [mapMoved, setMapMoved] = useState(false);
+    const [userChoseAddress, setUserChoseAddress] = useState(false);
+    const [routeDistance, setRouteDistance] = useState('');
+    const [showMemories, setShowMemories] = useState(true);
+    const [isGalleryVisible, setIsGalleryVisible] = useState(false);
+    const [isShareMemoryVisible, setIsShareMemoryVisible] = useState(false);
     const [memoryToShare, setMemoryToShare] = useState<Memory | null>(null);
-    const [shareEmail, setShareEmail] = useState<string>('');
+    const [shareEmail, setShareEmail] = useState('');
     const [isDarkMode, setIsDarkMode] = useState(false);
+    const [selectedPlacePhotoRef, setSelectedPlacePhotoRef] = useState<string | null>(null);
+    const [selectedPlaceCountry, setSelectedPlaceCountry] = useState<string | null>(null);
+    const [isAddingPlace, setIsAddingPlace] = useState(false);
+    const [isNoPhotoDescriptionVisible, setIsNoPhotoDescriptionVisible] = useState(false);
+    const [missingPhotoDescription, setMissingPhotoDescription] = useState('');
 
+    const { user } = useAuth();
     const GOOGLE_API_KEY = process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY;
 
-    const GetLocation = async () => {
-        let { status } = await Location.requestForegroundPermissionsAsync();
+    const getLocation = useCallback(async () => {
+        const { status } = await Location.requestForegroundPermissionsAsync();
         if (status !== 'granted') {
             setLoading(false);
             return null;
         }
-        let currentLocation = await Location.getCurrentPositionAsync({});
+        const currentLocation = await Location.getCurrentPositionAsync({});
+        locationRef.current = currentLocation;
         setLocation(currentLocation);
         setLoading(false);
         return currentLocation;
-    };
+    }, []);
 
-    const returnToStartingPoint = async () => {
-        const currentLocation = await GetLocation();
+    const returnToStartingPoint = useCallback(async () => {
+        const currentLocation = locationRef.current ?? await getLocation();
         if (mapRef.current && currentLocation) {
             mapRef.current.animateToRegion({
                 latitude: currentLocation.coords.latitude,
@@ -70,37 +85,50 @@ export const useMapLogic = (
                 longitudeDelta: 0.01,
             }, 500);
         }
-    };
+    }, [getLocation]);
 
-    const fetchPlaces = async (text: string) => {
+    const fetchPlaces = useCallback(async (text: string) => {
         setSearchQuery(text);
+        setUserChoseAddress(false);
+        setSelectedPlacePhotoRef(null);
+        setSelectedPlaceCountry(null);
         if (text.length < 3) {
-            SetGoogleResults([]);
+            setSearchResults([]);
             return;
         }
         try {
-            const response = await fetch(`https://maps.googleapis.com/maps/api/place/autocomplete/json?input=${text}&key=${GOOGLE_API_KEY}`);
+            const response = await fetch(
+                `https://maps.googleapis.com/maps/api/place/autocomplete/json?input=${text}&key=${GOOGLE_API_KEY}`
+            );
             const json = await response.json();
-            SetGoogleResults(json.predictions);
+            setSearchResults(json.predictions ?? []);
         } catch (error) {
             console.log(error);
         }
-    };
+    }, [GOOGLE_API_KEY]);
 
-    const handleSelectPlace = async (place_id: string, description: string) => {
-        const response = await fetch(`https://maps.googleapis.com/maps/api/place/details/json?place_id=${place_id}&fields=geometry&key=${GOOGLE_API_KEY}`);
+    const handleSelectPlace = useCallback(async (placeId: string, description: string) => {
+        const response = await fetch(
+            `https://maps.googleapis.com/maps/api/place/details/json?place_id=${placeId}&fields=geometry,photos,address_components&key=${GOOGLE_API_KEY}`
+        );
         const data = await response.json();
 
-        if (data.result && data.result.geometry) {
+        if (data.result?.geometry) {
             const lat = data.result.geometry.location.lat;
             const lng = data.result.geometry.location.lng;
 
+            const photoRef: string | null = data.result.photos?.[0]?.photo_reference ?? null;
+            const components = data.result.address_components as GoogleAddressComponent[] | undefined;
+            const folderName = getFolderNameFromGoogleAddressComponents(components) || null;
+
+            setSelectedPlacePhotoRef(photoRef);
+            setSelectedPlaceCountry(folderName);
             setShowRoute(false);
-            setDestinationlatitue(lat);
-            setDestinationlongtitude(lng);
-            SetGoogleResults([]);
+            setDestinationLatitude(lat);
+            setDestinationLongitude(lng);
+            setSearchResults([]);
             setSearchQuery(description);
-            setUserChooseAdress(true);
+            setUserChoseAddress(true);
             Keyboard.dismiss();
 
             mapRef.current?.animateToRegion({
@@ -110,30 +138,42 @@ export const useMapLogic = (
                 longitudeDelta: 0.01,
             }, 1000);
         }
-    };
+    }, [GOOGLE_API_KEY]);
 
-    const GetPlaceRoute = async (lat?: number, lng?: number) => {
-        const origin = `${location?.coords.latitude},${location?.coords.longitude}`;
-        const finalLat = lat !== undefined ? lat : destination_latitue;
-        const finalLng = lng !== undefined ? lng : destination_longtitude;
-        const destination = `${finalLat},${finalLng}`;
-
-        const directionsResponse = await fetch(
-            `https://maps.googleapis.com/maps/api/directions/json?origin=${origin}&destination=${destination}&mode=walking&key=${GOOGLE_API_KEY}`
-        );
-
-        const directionsData = await directionsResponse.json();
-        if (directionsData.routes.length > 0) {
-            const encodedPath = directionsData.routes[0].overview_polyline.points;
-            const decodedPath = decodePolyline(encodedPath);
-            setRouteCoordinates(decodedPath);
-            setRouteDistance(directionsData.routes[0].legs[0].distance.text);
+    const getPlaceRoute = useCallback(async (lat?: number, lng?: number): Promise<boolean> => {
+        if (!location?.coords) {
+            Alert.alert('Location needed', 'Turn on location to preview a route.');
+            return false;
         }
-    };
 
-    const openDrivingInWaze = async (lat?: number, lng?: number) => {
-        const finalLat = lat !== undefined ? lat : destination_latitue;
-        const finalLng = lng !== undefined ? lng : destination_longtitude;
+        const finalLat = lat !== undefined ? lat : destinationLatitude;
+        const finalLng = lng !== undefined ? lng : destinationLongitude;
+        if (!finalLat || !finalLng) {
+            Alert.alert('No destination', 'Choose a place on the map first.');
+            return false;
+        }
+
+        const origin = {
+            latitude: location.coords.latitude,
+            longitude: location.coords.longitude,
+        };
+        const destination = { latitude: finalLat, longitude: finalLng };
+
+        const result = await fetchWalkingRoutePreview(origin, destination, GOOGLE_API_KEY);
+
+        if (!result.ok) {
+            Alert.alert('Route unavailable', result.message);
+            return false;
+        }
+
+        setRouteCoordinates(result.coordinates);
+        setRouteDistance(result.distanceText);
+        return true;
+    }, [location, destinationLatitude, destinationLongitude, GOOGLE_API_KEY]);
+
+    const openDrivingInWaze = useCallback(async (lat?: number, lng?: number) => {
+        const finalLat = lat !== undefined ? lat : destinationLatitude;
+        const finalLng = lng !== undefined ? lng : destinationLongitude;
 
         if (!finalLat || !finalLng) {
             Alert.alert('No destination selected');
@@ -154,73 +194,154 @@ export const useMapLogic = (
         } catch (error) {
             Alert.alert('Could not open navigation app');
         }
-    };
+    }, [destinationLatitude, destinationLongitude]);
 
-    const handleStopRoute = () => {
+    const handleStopRoute = useCallback(() => {
         setShowRoute(false);
         returnToStartingPoint();
-        setShowSearchingBar(true);
+        setShowSearchBar(true);
         setRouteDistance('');
-        setDestinationlatitue(0);
-        setDestinationlongtitude(0);
-        setUserChooseAdress(false);
-    };
+        setDestinationLatitude(0);
+        setDestinationLongitude(0);
+        setUserChoseAddress(false);
+    }, [returnToStartingPoint]);
 
-    const handleMarkerPress = (memory: Memory) => {
-        setDestinationlatitue(memory.latitude);
-        setDestinationlongtitude(memory.longitude);
-        setUserChooseAdress(false);
+    const handleMarkerPress = useCallback((memory: Memory) => {
+        setDestinationLatitude(memory.latitude);
+        setDestinationLongitude(memory.longitude);
+        setUserChoseAddress(false);
         setMemoryToShare(memory);
 
-        Alert.alert(
-            "Memo Options",
-            "What would you like to do?",
-            [
+        const routeOption = {
+            text: "Route",
+            style: "default" as const,
+            onPress: () => {
+                Alert.alert(
+                    'Choose route type',
+                    'How would you like to navigate?',
+                    [
+                        { text: 'Cancel', style: 'cancel' },
+                        {
+                            text: 'Walk',
+                            onPress: () => {
+                                void (async () => {
+                                    setShowSearchBar(false);
+                                    await returnToStartingPoint();
+                                    const ok = await getPlaceRoute(memory.latitude, memory.longitude);
+                                    if (ok) {
+                                        setShowRoute(true);
+                                    } else {
+                                        setShowSearchBar(true);
+                                    }
+                                })();
+                            },
+                        },
+                        {
+                            text: 'Drive with Waze',
+                            onPress: () => openDrivingInWaze(memory.latitude, memory.longitude),
+                        },
+                    ]
+                );
+            },
+        };
+
+        const infoOption = {
+            text: "Info",
+            onPress: () => onInfoPress?.(memory),
+        };
+
+        if (memory.isShared) {
+            Alert.alert("Memo Options", "What would you like to do?", [
+                { text: "Cancel", style: "cancel" },
+                routeOption,
+                infoOption,
+            ]);
+        } else {
+            Alert.alert("Memo Options", "What would you like to do?", [
                 { text: "Cancel", style: "cancel" },
                 { text: "Delete", onPress: () => deleteMemory(memory.id), style: "destructive" },
+                routeOption,
+                infoOption,
                 {
-                    text: "Route",
+                    text: "Share",
                     onPress: () => {
-                        Alert.alert(
-                            'Choose route type',
-                            'How would you like to navigate?',
-                            [
-                                { text: 'Cancel', style: 'cancel' },
-                                {
-                                    text: 'Walk',
-                                    onPress: () => {
-                                        GetPlaceRoute(memory.latitude, memory.longitude);
-                                        setShowRoute(true);
-                                        returnToStartingPoint();
-                                        setShowSearchingBar(false);
-                                    },
-                                },
-                                {
-                                    text: 'Drive with Waze',
-                                    onPress: () => {
-                                        openDrivingInWaze(memory.latitude, memory.longitude);
-                                    },
-                                },
-                            ]
-                        );
-                    },
-                    style: "default",
-                },
-                {
-                    text: "Info",
-                    onPress: () => {
-                        onInfoPress?.(memory);
+                        setIsShareMemoryVisible(true);
+                        setMemoryToShare(memory);
                     },
                 },
-                { text: "Share", onPress: () => {
-                    setIsShareMemoryVisible(true);
-                    setMemoryToShare(memory);
-                    } }
-            ]
-        );
-    };
+            ]);
+        }
+    }, [deleteMemory, getPlaceRoute, returnToStartingPoint, openDrivingInWaze, onInfoPress]);
 
-    const jumpToLocation = (lat : number , lng: number) => {
+    const handleClearSearch = useCallback(() => {
+        setSearchQuery('');
+        setSearchResults([]);
+        setUserChoseAddress(false);
+        setSelectedPlacePhotoRef(null);
+        setSelectedPlaceCountry(null);
+        setIsNoPhotoDescriptionVisible(false);
+        setMissingPhotoDescription('');
+    }, []);
+
+    const saveSelectedPlaceMemory = useCallback(async (description?: string) => {
+        if (!user) {
+            Alert.alert('Sign in required', 'Please sign in to save memories.');
+            return;
+        }
+
+        const PLACEHOLDER_URL = 'https://placehold.co/400x400/e2e8f0/94a3b8.png?text=?';
+        const photoUri = selectedPlacePhotoRef
+            ? `https://maps.googleapis.com/maps/api/place/photo?maxwidth=1200&photo_reference=${selectedPlacePhotoRef}&key=${GOOGLE_API_KEY}`
+            : PLACEHOLDER_URL;
+
+        const country = selectedPlaceCountry ?? '';
+
+        setIsAddingPlace(true);
+        try {
+            await addPlaceMemory(photoUri, destinationLatitude, destinationLongitude, country, description);
+            Alert.alert('Memory saved!', 'The place has been added to your memories.');
+            handleClearSearch();
+        } catch {
+            Alert.alert('Error', 'Could not save the memory. Please try again.');
+        } finally {
+            setIsAddingPlace(false);
+        }
+    }, [
+        user,
+        selectedPlacePhotoRef,
+        selectedPlaceCountry,
+        destinationLatitude,
+        destinationLongitude,
+        GOOGLE_API_KEY,
+        addPlaceMemory,
+        handleClearSearch,
+    ]);
+
+    const addSelectedPlaceAsMemory = useCallback(async () => {
+        if (!selectedPlacePhotoRef) {
+            setMissingPhotoDescription('');
+            setIsNoPhotoDescriptionVisible(true);
+            return;
+        }
+        await saveSelectedPlaceMemory();
+    }, [selectedPlacePhotoRef, saveSelectedPlaceMemory]);
+
+    const closeNoPhotoDescriptionPrompt = useCallback(() => {
+        setIsNoPhotoDescriptionVisible(false);
+    }, []);
+
+    const saveNoPhotoPlaceWithoutDescription = useCallback(async () => {
+        setIsNoPhotoDescriptionVisible(false);
+        await saveSelectedPlaceMemory();
+    }, [saveSelectedPlaceMemory]);
+
+    const saveNoPhotoPlaceWithDescription = useCallback(async () => {
+        const description = missingPhotoDescription.trim();
+        setIsNoPhotoDescriptionVisible(false);
+        await saveSelectedPlaceMemory(description);
+    }, [missingPhotoDescription, saveSelectedPlaceMemory]);
+
+    const jumpToLocation = useCallback((lat: number, lng: number) => {
         setIsGalleryVisible(false);
 
         setTimeout(() => {
@@ -231,15 +352,21 @@ export const useMapLogic = (
                 longitudeDelta: 0.005,
             }, 500);
         }, 200);
-    }
+    }, []);
 
     return {
-        mapRef, location, loading, searchQuery, google_result,
-        destination_latitue, destination_longtitude, route_coordinates,
-        show_route, show_SearchingBar, map_Moved, userChooseAdress, routeDistance,showMemories,isGalleryVisible,isShareMemoryVisible,memoryToShare,shareEmail,isDarkMode,
-        setShowMemories,setShareEmail,setIsDarkMode,
-        setSearchQuery, setMapMoved, fetchPlaces, handleSelectPlace,setIsShareMemoryVisible,
-        GetPlaceRoute, openDrivingInWaze, handleMarkerPress, handleStopRoute, returnToStartingPoint,setMemoryToShare,
-        setShowRoute, setShowSearchingBar, setUserChooseAdress, setRouteDistance, setDestinationlatitue, setDestinationlongtitude,setIsGalleryVisible,jumpToLocation,
+        mapRef, location, loading, searchQuery, searchResults,
+        destinationLatitude, destinationLongitude, routeCoordinates,
+        showRoute, showSearchBar, mapMoved, userChoseAddress, routeDistance,
+        showMemories, isGalleryVisible, isShareMemoryVisible, memoryToShare, shareEmail, isDarkMode,
+        isAddingPlace, isNoPhotoDescriptionVisible, missingPhotoDescription,
+        setShowMemories, setShareEmail, setIsDarkMode,
+        setSearchQuery, setMapMoved, fetchPlaces, handleSelectPlace, setIsShareMemoryVisible,
+        getPlaceRoute, openDrivingInWaze, handleMarkerPress, handleStopRoute, returnToStartingPoint, setMemoryToShare,
+        setShowRoute, setShowSearchBar, setUserChoseAddress, setRouteDistance,
+        setDestinationLatitude, setDestinationLongitude, setIsGalleryVisible, jumpToLocation,
+        handleClearSearch, addSelectedPlaceAsMemory,
+        setMissingPhotoDescription, closeNoPhotoDescriptionPrompt,
+        saveNoPhotoPlaceWithoutDescription, saveNoPhotoPlaceWithDescription,
     };
 };

@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { View, Text, TextInput, TouchableOpacity, SafeAreaView, Alert, ActivityIndicator } from 'react-native';
 import {Link, useRouter} from "expo-router";
-import { supabase } from '../lib/supabase'; // Import the client you created
+import { supabase } from '@/lib/supabase';
 
 export default function SignUpScreen() {
 
@@ -58,6 +58,7 @@ async function handleSignUp() {
                 <TextInput
                     className="bg-slate-50 border border-slate-200 p-4 rounded-2xl text-slate-800"
                     placeholder="********"
+                    secureTextEntry
                     value={password}
                     onChangeText={setPassword}
                 />
