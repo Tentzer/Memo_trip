@@ -43,5 +43,3 @@ app-example
 /android
 
 .env
-app.json
-lib/supabase.ts

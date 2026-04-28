@@ -1,0 +1,35 @@
+{
+  "expo": {
+    "name": "Memo Trip",
+    "slug": "memo_trip",
+    "version": "1.0.0",
+    "orientation": "default",
+    "scheme": "memo-trip",
+    "userInterfaceStyle": "automatic",
+    "icon": "./assets/screenshots/MemoTrip_Logo.png",
+    "splash": {
+      "image": "./assets/screenshots/MemoTrip_Logo.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#ffffff"
+    },
+    "ios": {
+      "bundleIdentifier": "com.tentzer.memotrip"
+    },
+    "android": {
+      "package": "com.tentzer.memotrip",
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/screenshots/MemoTrip_Logo.png",
+        "backgroundColor": "#ffffff"
+      }
+    },
+    "plugins": [
+      "expo-router"
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "cc2d2c16-14c2-431f-8ba8-155c89bbe5db"
+      }
+    },
+    "owner": "tentzer"
+  }
+}
