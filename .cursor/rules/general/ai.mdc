@@ -1,0 +1,50 @@
+---
+description: AI Agent Fundamental Rules
+globs: 
+alwaysApply: true
+---
+
+# AI Agent Guidelines
+
+Follow these rules strictly. When rules conflict or are unclear, ask before implementing.
+
+## Core Principles
+
+- Start simple, add complexity only when proven necessary
+- Prefer obvious solutions over clever ones
+- Fix root causes, never symptoms
+- Solve one problem completely before moving to the next
+- Never use fallbacks or workarounds
+
+## Code Quality
+
+- DRY: Never duplicate code that serves the same function
+- Keep files under 300 lines; split into modules if exceeded
+- Follow existing codebase patterns over generic best practices
+- All configuration via environment variables, never hardcoded
+- Update relevant tests when modifying code
+
+## Communication
+
+- Ask clarifying questions when multiple paths exist
+- Present trade-offs with pros and cons
+- Confirm understanding before implementing complex features
+- Flag security or performance concerns proactively
+
+## Boundaries
+
+- Do exactly as instructed, suggest improvements separately
+- Never run build/deploy commands unless explicitly asked
+- Read existing documentation before making changes
+
+## Debugging
+
+- Add only logs when asked to debug, don't modify logic
+- Never use timeouts to solve race conditions
+- Find deterministic root causes
+
+## Style
+
+- Use NativeWind classes or StyleSheet; no inline style objects for complex styles
+- No emojis in code or comments
+- Keep JSDoc and comments short and current

@@ -1,5 +1,12 @@
 import * as Location from 'expo-location';
 
+const formattedAddressCache = new Map<string, string>();
+const formattedAddressRequests = new Map<string, Promise<string>>();
+
+function getCoordinateCacheKey(latitude: number, longitude: number): string {
+    return `${latitude.toFixed(6)},${longitude.toFixed(6)}`;
+}
+
 export const toDisplayFolderName = (value: string) =>
     value
         .trim()
@@ -8,6 +15,17 @@ export const toDisplayFolderName = (value: string) =>
         .replace(/\b\w/g, (char) => char.toUpperCase());
 
 export const toFolderLookupKey = (value: string) => value.trim().replace(/\s+/g, ' ').toLowerCase();
+
+const usStateAbbreviationDisplayNames: Record<string, string> = {
+    ca: 'California',
+    ny: 'New York',
+    va: 'Virginia',
+};
+
+export function normalizeLocationFolderName(value: string): string {
+    const displayName = toDisplayFolderName(value);
+    return usStateAbbreviationDisplayNames[toFolderLookupKey(displayName)] ?? displayName;
+}
 
 /** Google Places address_components item */
 export type GoogleAddressComponent = {
@@ -27,19 +45,39 @@ export function getFolderNameFromGoogleAddressComponents(
     const admin1 = components.find(c => c.types.includes('administrative_area_level_1'));
     const isUS = country?.short_name === 'US';
     if (isUS && admin1?.long_name?.trim()) {
-        return toDisplayFolderName(admin1.long_name);
+        return normalizeLocationFolderName(admin1.long_name);
     }
     const countryName = country?.long_name?.trim();
-    return countryName ? toDisplayFolderName(countryName) : '';
+    return countryName ? normalizeLocationFolderName(countryName) : '';
 }
 
 /**
  * Human-readable postal-style address from coordinates (Expo reverse geocode).
  */
+export function getCachedFormattedAddressFromCoords(
+    latitude: number,
+    longitude: number
+): string | null {
+    const key = getCoordinateCacheKey(latitude, longitude);
+    return formattedAddressCache.get(key) ?? null;
+}
+
 export async function getFormattedAddressFromCoords(
     latitude: number,
     longitude: number
 ): Promise<string> {
+    const key = getCoordinateCacheKey(latitude, longitude);
+    const cachedAddress = formattedAddressCache.get(key);
+    if (cachedAddress !== undefined) {
+        return cachedAddress;
+    }
+
+    const inFlightRequest = formattedAddressRequests.get(key);
+    if (inFlightRequest) {
+        return inFlightRequest;
+    }
+
+    const request = (async () => {
     try {
         const results = await Location.reverseGeocodeAsync({ latitude, longitude });
         const r = results[0];
@@ -61,6 +99,17 @@ export async function getFormattedAddressFromCoords(
         console.error('Address lookup failed:', error);
         return '';
     }
+    })();
+
+    formattedAddressRequests.set(key, request);
+
+    try {
+        const resolvedAddress = await request;
+        formattedAddressCache.set(key, resolvedAddress);
+        return resolvedAddress;
+    } finally {
+        formattedAddressRequests.delete(key);
+    }
 }
 
 export async function getCountryNameFromCoords(latitude: number, longitude: number): Promise<string> {
@@ -77,9 +126,9 @@ export async function getCountryNameFromCoords(latitude: number, longitude: numb
             country === 'USA';
 
         if (isUS && region) {
-            return toDisplayFolderName(region);
+            return normalizeLocationFolderName(region);
         }
-        return country ? toDisplayFolderName(country) : 'Unknown Location';
+        return country ? normalizeLocationFolderName(country) : 'Unknown Location';
     } catch (error) {
         console.error('Country lookup failed:', error);
         return 'Unknown Location';

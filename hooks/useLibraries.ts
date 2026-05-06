@@ -1,6 +1,8 @@
 import { useCallback } from 'react';
 import { Alert } from 'react-native';
+import * as ImagePicker from 'expo-image-picker';
 import { User } from '@supabase/supabase-js';
+import { uploadLibraryCover } from '@/lib/memoryApi';
 import { supabase } from '@/lib/supabase';
 import { Memory, CustomFolder } from '@/types/memory';
 import { loadMemoryMeta, saveMemoryMeta } from '@/lib/memoryStorage';
@@ -8,11 +10,9 @@ import { toDisplayFolderName, toFolderLookupKey } from '@/lib/geocoding';
 
 interface Params {
     user: User | null;
-    memories: Memory[];
-    customFolders: CustomFolder[];
-    sharedLibraryMemoriesByLibraryId: Record<string, Memory[]>;
     memoriesRef: React.MutableRefObject<Memory[]>;
     customFoldersRef: React.MutableRefObject<CustomFolder[]>;
+    sharedLibraryMemoriesByLibraryIdRef: React.MutableRefObject<Record<string, Memory[]>>;
     setMemories: React.Dispatch<React.SetStateAction<Memory[]>>;
     setCustomFolders: React.Dispatch<React.SetStateAction<CustomFolder[]>>;
     setSharedLibraryMemoriesByLibraryId: React.Dispatch<React.SetStateAction<Record<string, Memory[]>>>;
@@ -20,24 +20,25 @@ interface Params {
 
 export function useLibraries({
     user,
-    memories,
-    sharedLibraryMemoriesByLibraryId,
     memoriesRef,
     customFoldersRef,
+    sharedLibraryMemoriesByLibraryIdRef,
     setMemories,
     setCustomFolders,
     setSharedLibraryMemoriesByLibraryId,
 }: Params) {
 
+    // Reads only from refs so the function identity never changes, preventing
+    // cascade invalidation of every useMemo that depends on it.
     const getLibraryMemories = useCallback((folderId: string): Memory[] => {
-        const ownedMemories = memories.filter(m => m.customFolderIds.includes(folderId));
-        const sharedMemories = sharedLibraryMemoriesByLibraryId[folderId] ?? [];
+        const ownedMemories = memoriesRef.current.filter(m => m.customFolderIds.includes(folderId));
+        const sharedMemories = sharedLibraryMemoriesByLibraryIdRef.current[folderId] ?? [];
         const deduped = new Map<string, Memory>();
         [...ownedMemories, ...sharedMemories].forEach(m => deduped.set(m.id, m));
         return Array.from(deduped.values()).sort(
-            (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+            (a, b) => (b.created_at < a.created_at ? -1 : b.created_at > a.created_at ? 1 : 0)
         );
-    }, [memories, sharedLibraryMemoriesByLibraryId]);
+    }, []);
 
     const createCustomFolder = useCallback(async (folderName: string): Promise<{ success: boolean; message?: string }> => {
         if (!user?.id) {
@@ -64,7 +65,7 @@ export function useLibraries({
         const { data: insertedLibrary, error: insertLibraryError } = await supabase
             .from('libraries')
             .insert([{ owner_id: user.id, name: folderNameForDb }])
-            .select('id, name, owner_id, created_at')
+            .select('*')
             .single();
 
         if (insertLibraryError || !insertedLibrary) {
@@ -87,6 +88,7 @@ export function useLibraries({
             owner_id: insertedLibrary.owner_id,
             role: 'owner',
             isShared: false,
+            coverImageUrl: typeof insertedLibrary.cover_image_url === 'string' ? insertedLibrary.cover_image_url : null,
         };
 
         setCustomFolders(prev => [...prev, nextFolder].sort((a, b) => a.name.localeCompare(b.name)));
@@ -197,8 +199,18 @@ export function useLibraries({
         const targetFolder = customFoldersRef.current.find(f => f.id === folderId);
         if (!targetMemory || !targetFolder) return;
 
-        if (targetFolder.role !== 'owner') {
+        const canCurate =
+            targetFolder.role === 'owner'
+            || targetFolder.role === 'editor';
+        if (!canCurate) {
             Alert.alert('Read only', 'You do not have permission to edit this shared library.');
+            return;
+        }
+        if (targetFolder.role === 'editor' && targetMemory.isShared) {
+            Alert.alert(
+                'Your photos only',
+                'You can only add or remove your own photos in this shared library.'
+            );
             return;
         }
 
@@ -234,5 +246,69 @@ export function useLibraries({
         });
     }, [user, memoriesRef, customFoldersRef, setMemories]);
 
-    return { getLibraryMemories, createCustomFolder, removeLibrary, toggleMemoryInCustomFolder };
+    const updateCustomFolderCover = useCallback(async (folderId: string): Promise<{ success: boolean; message?: string }> => {
+        if (!user?.id) {
+            return { success: false, message: 'You need to be logged in to update a library cover.' };
+        }
+
+        const targetFolder = customFoldersRef.current.find(folder => folder.id === folderId);
+        if (!targetFolder) {
+            return { success: false, message: 'Library not found.' };
+        }
+
+        if (targetFolder.role !== 'owner') {
+            return { success: false, message: 'Only library owners can change the cover.' };
+        }
+
+        const mediaPermission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+        if (mediaPermission.status !== 'granted') {
+            return { success: false, message: 'Allow photo access to choose a library cover.' };
+        }
+
+        const pickerResult = await ImagePicker.launchImageLibraryAsync({
+            mediaTypes: ImagePicker.MediaTypeOptions.Images,
+            allowsEditing: true,
+            aspect: [4, 3],
+            quality: 0.9,
+        });
+
+        if (pickerResult.canceled) {
+            return { success: false };
+        }
+
+        const asset = pickerResult.assets[0];
+        if (!asset?.uri) {
+            return { success: false, message: 'Could not read the selected image.' };
+        }
+
+        const uploadResult = await uploadLibraryCover(asset.uri, folderId);
+        if (!uploadResult) {
+            return { success: false, message: 'Could not upload the library cover.' };
+        }
+
+        const { error: updateError } = await supabase
+            .from('libraries')
+            .update({ cover_image_url: uploadResult.publicUrl })
+            .eq('id', folderId);
+
+        if (updateError) {
+            if (updateError.message.includes('cover_image_url')) {
+                return {
+                    success: false,
+                    message: 'Library cover support needs the latest Supabase migration. Apply the new libraries cover-image migration and try again.',
+                };
+            }
+            return { success: false, message: updateError.message };
+        }
+
+        setCustomFolders(prev => prev.map(folder =>
+            folder.id === folderId
+                ? { ...folder, coverImageUrl: uploadResult.publicUrl }
+                : folder
+        ));
+
+        return { success: true };
+    }, [user, customFoldersRef, setCustomFolders]);
+
+    return { getLibraryMemories, createCustomFolder, removeLibrary, toggleMemoryInCustomFolder, updateCustomFolderCover };
 }

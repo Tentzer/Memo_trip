@@ -1,4 +1,4 @@
-import { getCountryNameFromCoords, toFolderLookupKey } from '@/lib/geocoding';
+import { getCountryNameFromCoords, normalizeLocationFolderName, toFolderLookupKey } from '@/lib/geocoding';
 import {
     getCustomFoldersStorageKey,
     getLibrariesMigratedKey,
@@ -15,6 +15,19 @@ function coalesceMetaText(dbValue: unknown, metaValue: string | undefined): stri
         return String(dbValue).trim();
     }
     return metaValue;
+}
+
+function mapLibraryRow(library: any, userId: string, roleByLibraryId: Record<string, CustomFolder['role']>): CustomFolder {
+    const id = library.id.toString();
+    return {
+        id,
+        name: library.name,
+        created_at: library.created_at ?? new Date().toISOString(),
+        owner_id: library.owner_id,
+        role: roleByLibraryId[id],
+        isShared: library.owner_id !== userId,
+        coverImageUrl: typeof library.cover_image_url === 'string' ? library.cover_image_url : null,
+    };
 }
 
 export interface LibraryState {
@@ -47,7 +60,7 @@ export async function fetchLibraryState(userId: string): Promise<LibraryState> {
     const libraryIds = Object.keys(roleByLibraryId);
     const { data: libraryRows, error: librariesError } = await supabase
         .from('libraries')
-        .select('id, owner_id, name, created_at')
+        .select('*')
         .in('id', libraryIds);
 
     if (librariesError || !libraryRows) {
@@ -56,17 +69,7 @@ export async function fetchLibraryState(userId: string): Promise<LibraryState> {
     }
 
     const folders: CustomFolder[] = libraryRows
-        .map((library: any) => {
-            const id = library.id.toString();
-            return {
-                id,
-                name: library.name,
-                created_at: library.created_at ?? new Date().toISOString(),
-                owner_id: library.owner_id,
-                role: roleByLibraryId[id],
-                isShared: library.owner_id !== userId,
-            };
-        })
+        .map((library: any) => mapLibraryRow(library, userId, roleByLibraryId))
         .sort((a, b) => a.name.localeCompare(b.name));
 
     const { data: libraryMemoRows, error: libraryMemosError } = await supabase
@@ -187,10 +190,19 @@ export async function buildFormattedMemories(
             const existingMeta = nextMeta[memoryId] ?? storedMeta[memoryId] ?? { customFolderIds: [] };
             const title = coalesceMetaText(item.title, existingMeta.title);
             const description = coalesceMetaText(item.description, existingMeta.description);
-            let country = existingMeta.country;
+            let country = existingMeta.country ? normalizeLocationFolderName(existingMeta.country) : existingMeta.country;
 
             if (!country) {
                 country = await getCountryNameFromCoords(item.latitude, item.longitude);
+                nextMeta[memoryId] = {
+                    country,
+                    title,
+                    description,
+                    customFolderIds: memoLibraryIdsMap[memoryId] ?? [],
+                    excludeFromCountryFolder: existingMeta.excludeFromCountryFolder ?? false,
+                };
+                didUpdateMeta = true;
+            } else if (country !== existingMeta.country) {
                 nextMeta[memoryId] = {
                     country,
                     title,
@@ -207,6 +219,7 @@ export async function buildFormattedMemories(
                 latitude: item.latitude,
                 longitude: item.longitude,
                 created_at: item.created_at ?? new Date().toISOString(),
+                deletedAt: item.deleted_at ?? null,
                 owner_id: item.user_id,
                 isShared: item.user_id !== userId,
                 country,
@@ -281,6 +294,31 @@ export async function uploadPicture(
         return { persistedId, publicUrl };
     } catch (err) {
         console.error('Cloud sync failed:', err);
+        return null;
+    }
+}
+
+export async function uploadLibraryCover(
+    imageUri: string,
+    folderId: string
+): Promise<{ publicUrl: string } | null> {
+    try {
+        const fileName = `library-covers/${folderId}-${Date.now()}.jpg`;
+        const response = await fetch(imageUri);
+        const blob = await response.blob();
+        const arrayBuffer = await new Response(blob).arrayBuffer();
+
+        const { error: storageError } = await supabase.storage
+            .from('memories')
+            .upload(fileName, arrayBuffer, { contentType: 'image/jpeg' });
+
+        if (storageError) throw storageError;
+
+        const { data: { publicUrl } } = supabase.storage.from('memories').getPublicUrl(fileName);
+
+        return { publicUrl };
+    } catch (error) {
+        console.error('Library cover upload failed:', error);
         return null;
     }
 }

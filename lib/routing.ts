@@ -53,6 +53,67 @@ export function decimateCoordinates(points: LatLng[], maxPoints: number): LatLng
     return out;
 }
 
+export type MultiStopRouteResult =
+    | { ok: true; coordinates: LatLng[] }
+    | { ok: false; code: 'no_api_key' | 'no_stops' | 'no_route' | 'network' | 'bad_response'; message: string };
+
+/**
+ * Fetches a driving route through multiple pre-ordered stops.
+ * The stop order must already be optimized (e.g. by the plan-agent Edge Function).
+ */
+export async function fetchMultiStopRoute(
+    origin: LatLng,
+    stops: { placeId: string }[],
+    apiKey: string | undefined
+): Promise<MultiStopRouteResult> {
+    if (!apiKey?.trim()) {
+        return { ok: false, code: 'no_api_key', message: 'Maps API key is not configured.' };
+    }
+    if (!stops.length) {
+        return { ok: false, code: 'no_stops', message: 'No stops provided.' };
+    }
+
+    const lastStop = stops[stops.length - 1];
+    const params: Record<string, string> = {
+        origin: `${origin.latitude},${origin.longitude}`,
+        destination: `place_id:${lastStop.placeId}`,
+        mode: 'driving',
+        key: apiKey.trim(),
+    };
+
+    if (stops.length >= 2) {
+        const intermediates = stops.slice(0, -1);
+        params.waypoints = intermediates.map((s) => `place_id:${s.placeId}`).join('|');
+    }
+
+    let data: {
+        status?: string;
+        routes?: { overview_polyline?: { points?: string } }[];
+    };
+
+    try {
+        const res = await fetch(
+            `https://maps.googleapis.com/maps/api/directions/json?${new URLSearchParams(params)}`
+        );
+        data = await res.json();
+    } catch {
+        return { ok: false, code: 'network', message: 'Could not reach Google Directions. Check your connection.' };
+    }
+
+    if (data.status !== 'OK' || !data.routes?.length) {
+        return { ok: false, code: 'no_route', message: 'No route found for the itinerary.' };
+    }
+
+    const encoded = data.routes[0].overview_polyline?.points;
+    if (!encoded) {
+        return { ok: false, code: 'bad_response', message: 'Unexpected response from directions service.' };
+    }
+
+    const decoded = decodeGooglePolyline(encoded);
+    const coordinates = decimateCoordinates(decoded, MAX_POLYLINE_POINTS);
+    return { ok: true, coordinates };
+}
+
 export type WalkingRouteResult =
     | { ok: true; coordinates: LatLng[]; distanceText: string }
     | { ok: false; code: 'too_far' | 'no_location' | 'no_api_key' | 'no_route' | 'network' | 'bad_response'; message: string };
