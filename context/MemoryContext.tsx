@@ -1,9 +1,10 @@
 import { useLibraries } from '@/hooks/useLibraries';
 import { useMemoryCRUD } from '@/hooks/useMemoryCRUD';
 import { useSharing } from '@/hooks/useSharing';
-import { loadUserMemories } from '@/lib/memoryApi';
+import { loadUserMemories, type LoadedMemories } from '@/lib/memoryApi';
+import { loadMemoriesSnapshot, saveMemoriesSnapshot } from '@/lib/memoriesSnapshot';
 import { InviteActionResult, PendingInvite } from '@/types/invites';
-import { CustomFolder, Memory } from '@/types/memory';
+import { CustomFolder, Memory, MemoryPlaceCategory } from '@/types/memory';
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { useAuth } from './AuthContext';
 
@@ -22,18 +23,27 @@ interface MemoryContextType {
         country: string,
         description?: string,
         title?: string,
-        options?: { customFolderIds?: string[] }
+        options?: {
+            customFolderIds?: string[];
+            source?: 'video_import';
+            sourceUrl?: string;
+            placeCategory?: MemoryPlaceCategory;
+        }
     ) => Promise<void>;
     deleteMemory: (id: string) => void;
     updateMemoryInfo: (memoryId: string, title: string, description: string) => Promise<void>;
     createCustomFolder: (folderName: string) => Promise<{ success: boolean; message?: string }>;
     removeLibrary: (folderId: string) => Promise<{ success: boolean; message?: string }>;
     toggleMemoryInCustomFolder: (memoryId: string, folderId: string) => Promise<void>;
+    addMemoriesToCustomFolder: (
+        memoryIds: string[],
+        folderId: string,
+    ) => Promise<{ added: number; skipped: number; error?: string }>;
     updateCustomFolderCover: (folderId: string) => Promise<{ success: boolean; message?: string }>;
     getLibraryMemories: (folderId: string) => Memory[];
-    handleShareSubmit: (user_email: string, selectedMemory: Memory | null) => Promise<void>;
-    shareCustomFolder: (user_email: string, folderId: string) => Promise<void>;
-    grantLibraryEditAccess: (user_email: string, folderId: string) => Promise<void>;
+    handleShareSubmit: (recipientInput: string, selectedMemory: Memory | null) => Promise<void>;
+    shareCustomFolder: (recipientInput: string, folderId: string) => Promise<void>;
+    grantLibraryEditAccess: (recipientInput: string, folderId: string) => Promise<void>;
     pendingInvites: PendingInvite[];
     invitesLoading: boolean;
     reloadMemories: () => Promise<void>;
@@ -46,7 +56,7 @@ interface MemoryContextType {
 
 const MemoryContext = createContext<MemoryContextType | undefined>(undefined);
 
-export function MemoryProvider({ children }: { children: React.ReactNode }) {
+export function MemoryProvider({ children, ready = true }: { children: React.ReactNode; ready?: boolean }) {
     const { user } = useAuth();
 
     const [memories, setMemories] = useState<Memory[]>([]);
@@ -56,36 +66,111 @@ export function MemoryProvider({ children }: { children: React.ReactNode }) {
     const memoriesRef = useRef<Memory[]>([]);
     const customFoldersRef = useRef<CustomFolder[]>([]);
     const sharedLibraryMemoriesByLibraryIdRef = useRef<Record<string, Memory[]>>({});
+    const activeUserIdRef = useRef<string | null>(null);
+    const loadTokenRef = useRef(0);
+
+    useEffect(() => { activeUserIdRef.current = user?.id ?? null; }, [user?.id]);
 
     useEffect(() => { memoriesRef.current = memories; }, [memories]);
     useEffect(() => { customFoldersRef.current = customFolders; }, [customFolders]);
     useEffect(() => { sharedLibraryMemoriesByLibraryIdRef.current = sharedLibraryMemoriesByLibraryId; }, [sharedLibraryMemoriesByLibraryId]);
 
+    const invalidatePendingReload = useCallback(() => {
+        loadTokenRef.current += 1;
+    }, []);
+
+    const persistMemoriesSnapshot = useCallback(async (nextMemories: Memory[]) => {
+        const userId = user?.id;
+        if (!userId) return;
+        await saveMemoriesSnapshot(userId, {
+            memories: nextMemories,
+            customFolders: customFoldersRef.current,
+            sharedMap: sharedLibraryMemoriesByLibraryIdRef.current,
+        });
+    }, [user?.id]);
+
+    const applySuccessfulLoad = useCallback(async (userId: string, data: LoadedMemories, loadToken: number) => {
+        if (activeUserIdRef.current !== userId) return;
+        if (loadToken !== loadTokenRef.current) return;
+        setMemories(data.memories);
+        setCustomFolders(data.customFolders);
+        setSharedLibraryMemoriesByLibraryId(data.sharedMap);
+        if (activeUserIdRef.current !== userId) return;
+        if (loadToken !== loadTokenRef.current) return;
+        await saveMemoriesSnapshot(userId, data);
+    }, []);
+
     const reloadMemories = useCallback(async () => {
-        if (!user?.id) return;
-        const result = await loadUserMemories(user.id);
-        setMemories(result.memories);
-        setCustomFolders(result.customFolders);
-        setSharedLibraryMemoriesByLibraryId(result.sharedMap);
-    }, [user]);
+        const userId = user?.id;
+        if (!userId) return;
+        const loadToken = loadTokenRef.current;
+        const result = await loadUserMemories(userId);
+        if (!result.ok) return;
+        await applySuccessfulLoad(userId, {
+            memories: result.memories,
+            customFolders: result.customFolders,
+            sharedMap: result.sharedMap,
+        }, loadToken);
+    }, [user?.id, applySuccessfulLoad]);
 
     useEffect(() => {
-        if (user) {
-            reloadMemories();
-        } else {
+        if (user && ready) {
+            const userId = user.id;
+            let cancelled = false;
+
+            void (async () => {
+                const loadToken = loadTokenRef.current;
+                const hydrated = await loadMemoriesSnapshot(userId);
+                if (cancelled) return;
+                if (activeUserIdRef.current !== userId) return;
+                if (loadToken !== loadTokenRef.current) return;
+                if (hydrated) {
+                    setMemories(hydrated.memories);
+                    setCustomFolders(hydrated.customFolders);
+                    setSharedLibraryMemoriesByLibraryId(hydrated.sharedMap);
+                }
+
+                const result = await loadUserMemories(userId);
+                if (cancelled) return;
+                if (activeUserIdRef.current !== userId) return;
+                if (!result.ok) return;
+                if (loadToken !== loadTokenRef.current) return;
+
+                await applySuccessfulLoad(userId, {
+                    memories: result.memories,
+                    customFolders: result.customFolders,
+                    sharedMap: result.sharedMap,
+                }, loadToken);
+            })();
+
+            return () => {
+                cancelled = true;
+            };
+        }
+
+        if (!user) {
             setMemories([]);
             setCustomFolders([]);
             setSharedLibraryMemoriesByLibraryId({});
         }
-    }, [user]);
+    }, [user, ready, applySuccessfulLoad]);
 
     const { addMemory, addPlaceMemory, deleteMemory, updateMemoryInfo } = useMemoryCRUD({
         user,
         memoriesRef,
         setMemories,
+        invalidatePendingReload,
+        persistMemoriesSnapshot,
     });
 
-    const { getLibraryMemories, createCustomFolder, removeLibrary, toggleMemoryInCustomFolder, updateCustomFolderCover } = useLibraries({
+    const {
+        getLibraryMemories,
+        createCustomFolder,
+        removeLibrary,
+        toggleMemoryInCustomFolder,
+        addMemoriesToCustomFolder,
+        updateCustomFolderCover,
+    } = useLibraries({
         user,
         memoriesRef,
         customFoldersRef,
@@ -138,6 +223,7 @@ export function MemoryProvider({ children }: { children: React.ReactNode }) {
         createCustomFolder,
         removeLibrary,
         toggleMemoryInCustomFolder,
+        addMemoriesToCustomFolder,
         updateCustomFolderCover,
         getLibraryMemories,
         handleShareSubmit,
@@ -154,7 +240,7 @@ export function MemoryProvider({ children }: { children: React.ReactNode }) {
     }), [
         memories, sharedLibraryMemories, customFolders,
         addMemory, addPlaceMemory, deleteMemory, updateMemoryInfo,
-        createCustomFolder, removeLibrary, toggleMemoryInCustomFolder, updateCustomFolderCover, getLibraryMemories,
+        createCustomFolder, removeLibrary, toggleMemoryInCustomFolder, addMemoriesToCustomFolder, updateCustomFolderCover, getLibraryMemories,
         handleShareSubmit, shareCustomFolder, grantLibraryEditAccess, pendingInvites, invitesLoading, reloadMemories, refreshPendingInvites,
         acceptMemoInvite, declineMemoInvite, acceptLibraryInvite, declineLibraryInvite,
     ]);

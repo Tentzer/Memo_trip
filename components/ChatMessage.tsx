@@ -1,6 +1,7 @@
 import React from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 
+import { useAppTheme } from '@/context/ThemeContext';
 import type { ChatMessage as ChatMessageType, PlanStop, RecommendedPlace } from '@/types/plan';
 import ItineraryCard from './ItineraryCard';
 import RecommendationsCard from './RecommendationsCard';
@@ -12,6 +13,9 @@ interface Props {
 }
 
 export default function ChatMessage({ message, onAddStopToMap, onSaveToMemories }: Props) {
+    const { theme } = useAppTheme();
+    const styles = React.useMemo(() => createStyles(theme.colors), [theme.colors]);
+
     if (message.role === 'user') {
         return (
             <View style={styles.userWrapper}>
@@ -78,7 +82,9 @@ export default function ChatMessage({ message, onAddStopToMap, onSaveToMemories 
     );
 }
 
-const styles = StyleSheet.create({
+type ThemeColors = ReturnType<typeof useAppTheme>['theme']['colors'];
+
+const createStyles = (colors: ThemeColors) => StyleSheet.create({
     userWrapper: {
         marginVertical: 4,
         paddingHorizontal: 16,
@@ -96,7 +102,7 @@ const styles = StyleSheet.create({
         alignSelf: 'flex-end',
     },
     agentBubble: {
-        backgroundColor: '#F1F5F9',
+        backgroundColor: colors.surface,
         borderRadius: 18,
         borderBottomLeftRadius: 4,
         paddingHorizontal: 14,
@@ -111,7 +117,7 @@ const styles = StyleSheet.create({
         lineHeight: 22,
     },
     agentText: {
-        color: '#1E293B',
+        color: colors.text,
         fontSize: 15,
         lineHeight: 22,
     },
@@ -121,7 +127,7 @@ const styles = StyleSheet.create({
         marginHorizontal: 16,
         fontSize: 15,
         fontWeight: '700',
-        color: '#0F172A',
+        color: colors.text,
     },
     itineraryBlock: {
         marginTop: 8,

@@ -1,46 +1,75 @@
 import { type Memory } from '@/context/MemoryContext';
+import { useAppTheme } from '@/context/ThemeContext';
 import { Ionicons } from '@expo/vector-icons';
 import { Image as ExpoImage } from 'expo-image';
-import React from 'react';
-import { Modal, Pressable, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import React, { useCallback, useEffect } from 'react';
+import {
+    Modal,
+    StyleSheet,
+    Text,
+    TouchableOpacity,
+    TouchableWithoutFeedback,
+    View,
+} from 'react-native';
+import Animated, {
+    runOnJS,
+    useAnimatedStyle,
+    useSharedValue,
+    withSpring,
+    withTiming,
+} from 'react-native-reanimated';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 interface Props {
-    visible: boolean;
-    memory: Memory | null;
+    memory: Memory;
     onClose: () => void;
     onOpenInfo: () => void;
     onStartWalkingRoute: () => void;
     onOpenDrivingRoute: () => void;
     onShare: () => void;
     onDelete: () => void;
-    deleteLabel?: string;
 }
+
+type ThemeColors = ReturnType<typeof useAppTheme>['theme']['colors'];
 
 function ActionButton({
     icon,
     label,
     onPress,
     destructive = false,
+    colors,
 }: {
     icon: React.ComponentProps<typeof Ionicons>['name'];
     label: string;
     onPress: () => void;
     destructive?: boolean;
+    colors: ThemeColors;
 }) {
     return (
         <TouchableOpacity
             onPress={onPress}
-            style={[styles.actionButton, destructive && styles.destructiveButton]}
-            activeOpacity={0.85}
+            activeOpacity={0.75}
+            style={[
+                styles.actionButton,
+                {
+                    backgroundColor: destructive ? colors.dangerSoft : colors.accentSoft,
+                    borderColor: destructive ? colors.danger : colors.border,
+                },
+            ]}
         >
-            <Ionicons name={icon} size={18} color={destructive ? '#b91c1c' : '#0f172a'} />
-            <Text style={[styles.actionLabel, destructive && styles.destructiveLabel]}>{label}</Text>
+            <Ionicons
+                name={icon}
+                size={20}
+                color={destructive ? colors.danger : colors.accent}
+            />
+            <Text style={[styles.actionLabel, { color: destructive ? colors.danger : colors.text }]}>
+                {label}
+            </Text>
         </TouchableOpacity>
     );
 }
 
 export default function MemoActionsSheet({
-    visible,
     memory,
     onClose,
     onOpenInfo,
@@ -48,147 +77,212 @@ export default function MemoActionsSheet({
     onOpenDrivingRoute,
     onShare,
     onDelete,
-    deleteLabel = 'Delete',
 }: Props) {
-    if (!visible || !memory) return null;
+    const { theme } = useAppTheme();
+    const insets = useSafeAreaInsets();
+    const translateY = useSharedValue(600);
+    const backdropOpacity = useSharedValue(0);
+
+    useEffect(() => {
+        backdropOpacity.value = withTiming(1, { duration: 220 });
+        translateY.value = withSpring(0, { damping: 22, stiffness: 220, mass: 0.8 });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []);
+
+    const dismiss = useCallback((afterClose?: () => void) => {
+        backdropOpacity.value = withTiming(0, { duration: 200 });
+        translateY.value = withTiming(600, { duration: 240 }, (finished) => {
+            if (finished) {
+                if (afterClose) runOnJS(afterClose)();
+                runOnJS(onClose)();
+            }
+        });
+    }, [backdropOpacity, translateY, onClose]);
+
+    const sheetStyle = useAnimatedStyle(() => ({
+        transform: [{ translateY: translateY.value }],
+    }));
+
+    const backdropStyle = useAnimatedStyle(() => ({
+        opacity: backdropOpacity.value,
+    }));
 
     const title = memory.title?.trim() || memory.country || 'Memo';
-    const subtitle = memory.description?.trim() || 'Choose what you want to do with this memo.';
+    const subtitle = memory.description?.trim() || 'Choose what to do with this memo.';
 
     return (
         <Modal
-            visible={visible}
-            transparent={true}
-            animationType="slide"
-            onRequestClose={onClose}
+            visible
+            transparent
+            animationType="none"
+            statusBarTranslucent
+            onRequestClose={() => dismiss()}
         >
-            <View style={styles.overlay}>
-                <Pressable style={styles.backdrop} onPress={onClose} />
+            <View style={styles.container} pointerEvents="box-none">
+                <TouchableWithoutFeedback onPress={() => dismiss()}>
+                    <Animated.View
+                        style={[
+                            StyleSheet.absoluteFill,
+                            styles.backdrop,
+                            backdropStyle,
+                        ]}
+                    />
+                </TouchableWithoutFeedback>
 
-                <View style={styles.sheet} onStartShouldSetResponder={() => true}>
-                    <View style={styles.handle} />
+                <Animated.View
+                    style={[
+                        styles.sheet,
+                        {
+                            backgroundColor: theme.colors.surface,
+                            paddingBottom: Math.max(insets.bottom, 16) + 8,
+                            shadowColor: theme.colors.shadow,
+                        },
+                        sheetStyle,
+                    ]}
+                >
+                    <View style={[styles.handle, { backgroundColor: theme.colors.handle }]} />
 
                     <View style={styles.previewRow}>
                         <ExpoImage
                             source={{ uri: memory.uri }}
-                            style={styles.previewImage}
+                            style={[styles.previewImage, { backgroundColor: theme.colors.surfaceMuted }]}
                             contentFit="cover"
                             cachePolicy="memory-disk"
                         />
-
-                        <View style={styles.previewText}>
-                            <Text style={styles.title} numberOfLines={1}>
+                        <View style={styles.previewTextBlock}>
+                            <Text
+                                style={[styles.previewTitle, { color: theme.colors.text }]}
+                                numberOfLines={1}
+                            >
                                 {title}
                             </Text>
-                            <Text style={styles.subtitle} numberOfLines={2}>
+                            <Text
+                                style={[styles.previewSubtitle, { color: theme.colors.textMuted }]}
+                                numberOfLines={2}
+                            >
                                 {subtitle}
                             </Text>
                         </View>
                     </View>
 
+                    <View style={[styles.divider, { backgroundColor: theme.colors.border }]} />
+
                     <View style={styles.actionsGrid}>
-                        <ActionButton icon="information-circle-outline" label="Info" onPress={onOpenInfo} />
-                        <ActionButton icon="walk-outline" label="Walk" onPress={onStartWalkingRoute} />
-                        <ActionButton icon="navigate-outline" label="Drive" onPress={onOpenDrivingRoute} />
-                        {!memory.isShared ? (
+                        <ActionButton
+                            icon="information-circle-outline"
+                            label="Info"
+                            onPress={() => dismiss(onOpenInfo)}
+                            colors={theme.colors}
+                        />
+                        <ActionButton
+                            icon="walk-outline"
+                            label="Walk"
+                            onPress={() => dismiss(onStartWalkingRoute)}
+                            colors={theme.colors}
+                        />
+                        <ActionButton
+                            icon="navigate-outline"
+                            label="Drive"
+                            onPress={() => dismiss(onOpenDrivingRoute)}
+                            colors={theme.colors}
+                        />
+                        {!memory.isShared && (
                             <>
-                                <ActionButton icon="share-social-outline" label="Share" onPress={onShare} />
-                                <ActionButton icon="trash-outline" label={deleteLabel} onPress={onDelete} destructive />
+                                <ActionButton
+                                    icon="share-social-outline"
+                                    label="Share"
+                                    onPress={() => dismiss(onShare)}
+                                    colors={theme.colors}
+                                />
+                                <ActionButton
+                                    icon="trash-outline"
+                                    label="Delete"
+                                    onPress={() => dismiss(onDelete)}
+                                    colors={theme.colors}
+                                    destructive
+                                />
                             </>
-                        ) : null}
+                        )}
                     </View>
-                </View>
+                </Animated.View>
             </View>
         </Modal>
     );
 }
 
 const styles = StyleSheet.create({
-    overlay: {
-        ...StyleSheet.absoluteFillObject,
-        zIndex: 950,
+    container: {
+        flex: 1,
         justifyContent: 'flex-end',
     },
     backdrop: {
-        ...StyleSheet.absoluteFillObject,
-        backgroundColor: 'rgba(15, 23, 42, 0.28)',
+        backgroundColor: 'rgba(0,0,0,0.48)',
     },
     sheet: {
-        backgroundColor: 'white',
-        borderTopLeftRadius: 24,
-        borderTopRightRadius: 24,
+        borderTopLeftRadius: 26,
+        borderTopRightRadius: 26,
         paddingHorizontal: 18,
-        paddingTop: 12,
-        paddingBottom: 28,
-        shadowColor: '#0f172a',
+        paddingTop: 10,
+        shadowOffset: { width: 0, height: -4 },
         shadowOpacity: 0.12,
         shadowRadius: 16,
-        elevation: 12,
+        elevation: 20,
     },
     handle: {
-        width: 44,
-        height: 5,
-        borderRadius: 999,
-        backgroundColor: '#cbd5e1',
+        width: 42,
+        height: 4,
+        borderRadius: 2,
         alignSelf: 'center',
-        marginBottom: 16,
+        marginBottom: 18,
     },
     previewRow: {
         flexDirection: 'row',
         alignItems: 'center',
+        marginBottom: 16,
     },
     previewImage: {
-        width: 64,
-        height: 64,
-        borderRadius: 18,
-        backgroundColor: '#e2e8f0',
+        width: 62,
+        height: 62,
+        borderRadius: 14,
     },
-    previewText: {
+    previewTextBlock: {
         flex: 1,
         marginLeft: 14,
     },
-    title: {
+    previewTitle: {
         fontSize: 17,
-        fontWeight: '800',
-        color: '#0f172a',
+        fontWeight: '700',
+        letterSpacing: -0.2,
     },
-    subtitle: {
-        marginTop: 4,
+    previewSubtitle: {
+        marginTop: 3,
         fontSize: 13,
         lineHeight: 18,
-        color: '#64748b',
+    },
+    divider: {
+        height: StyleSheet.hairlineWidth,
+        marginBottom: 16,
     },
     actionsGrid: {
         flexDirection: 'row',
         flexWrap: 'wrap',
         gap: 10,
-        marginTop: 18,
     },
     actionButton: {
-        minWidth: '30%',
-        flexGrow: 1,
-        flexBasis: '30%',
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'center',
-        gap: 8,
+        gap: 7,
         paddingHorizontal: 14,
         paddingVertical: 13,
         borderRadius: 16,
-        backgroundColor: '#eff6ff',
         borderWidth: 1,
-        borderColor: '#dbeafe',
+        minWidth: '30%',
+        flexGrow: 1,
+        flexBasis: '30%',
     },
     actionLabel: {
         fontSize: 14,
-        fontWeight: '700',
-        color: '#0f172a',
-    },
-    destructiveButton: {
-        backgroundColor: '#fef2f2',
-        borderColor: '#fecaca',
-    },
-    destructiveLabel: {
-        color: '#b91c1c',
+        fontWeight: '600',
     },
 });

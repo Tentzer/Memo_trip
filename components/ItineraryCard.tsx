@@ -9,6 +9,7 @@ import {
 } from 'react-native';
 
 import type { PlanStop, StopCategory } from '@/types/plan';
+import { useAppTheme } from '@/context/ThemeContext';
 
 interface Props {
     stops: PlanStop[];
@@ -23,6 +24,8 @@ const CATEGORY_ICON: Record<StopCategory, keyof typeof Ionicons.glyphMap> = {
 };
 
 export default function ItineraryCard({ stops, onAddToMap }: Props) {
+    const { theme } = useAppTheme();
+    const styles = React.useMemo(() => createStyles(theme.colors), [theme.colors]);
     const [addingId, setAddingId] = useState<string | null>(null);
     const [savedIds, setSavedIds] = useState<Set<string>>(new Set());
 
@@ -49,7 +52,7 @@ export default function ItineraryCard({ stops, onAddToMap }: Props) {
                     <View style={styles.stopContent}>
                         {stop.travelFromPreviousMinutes > 0 && (
                             <View style={styles.travelRow}>
-                                <Ionicons name="car-outline" size={12} color="#94A3B8" />
+                                <Ionicons name="car-outline" size={12} color={theme.colors.textMuted} />
                                 <Text style={styles.travelText}>
                                     {stop.travelFromPreviousMinutes} min drive
                                 </Text>
@@ -114,12 +117,14 @@ export default function ItineraryCard({ stops, onAddToMap }: Props) {
     );
 }
 
-const styles = StyleSheet.create({
+type ThemeColors = ReturnType<typeof useAppTheme>['theme']['colors'];
+
+const createStyles = (colors: ThemeColors) => StyleSheet.create({
     card: {
-        backgroundColor: '#FFFFFF',
+        backgroundColor: colors.surface,
         borderRadius: 14,
         borderWidth: 1,
-        borderColor: '#E2E8F0',
+        borderColor: colors.border,
         marginTop: 8,
         marginHorizontal: 16,
         paddingVertical: 12,
@@ -143,7 +148,7 @@ const styles = StyleSheet.create({
     line: {
         width: 2,
         flex: 1,
-        backgroundColor: '#BFDBFE',
+        backgroundColor: colors.accentSoft,
         marginTop: 4,
         marginBottom: -4,
     },
@@ -160,7 +165,7 @@ const styles = StyleSheet.create({
     },
     travelText: {
         fontSize: 12,
-        color: '#94A3B8',
+        color: colors.textMuted,
     },
     stopHeader: {
         flexDirection: 'row',
@@ -172,17 +177,17 @@ const styles = StyleSheet.create({
     stopName: {
         fontSize: 15,
         fontWeight: '600',
-        color: '#1E293B',
+        color: colors.text,
         flex: 1,
     },
     timeText: {
         fontSize: 13,
-        color: '#64748B',
+        color: colors.textSecondary,
         marginTop: 2,
     },
     hoursText: {
         fontSize: 12,
-        color: '#94A3B8',
+        color: colors.textMuted,
         marginTop: 2,
     },
     warningRow: {
@@ -206,12 +211,12 @@ const styles = StyleSheet.create({
         paddingVertical: 5,
         borderRadius: 20,
         borderWidth: 1,
-        borderColor: '#BFDBFE',
-        backgroundColor: '#EFF6FF',
+        borderColor: colors.accent,
+        backgroundColor: colors.accentSoft,
     },
     addButtonSaved: {
-        borderColor: '#BBF7D0',
-        backgroundColor: '#F0FDF4',
+        borderColor: colors.success,
+        backgroundColor: colors.successSoft,
     },
     addButtonText: {
         fontSize: 12,

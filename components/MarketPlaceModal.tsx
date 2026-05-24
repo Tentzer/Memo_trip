@@ -1,5 +1,11 @@
 import { useMarketplace } from '@/hooks/useMarketplace';
+import { useAppTheme } from '@/context/ThemeContext';
 import { MarketLibrary, MarketPhoto } from '@/lib/marketplaceApi';
+import {
+    normalizeMarketplaceCountryDisplay,
+    resolveMarketplaceCountry,
+} from '@/lib/marketplaceCountry';
+import { alertRequireSignIn } from '@/lib/requireSignInAlert';
 import { CustomFolder, Memory } from '@/types/memory';
 import { Ionicons } from '@expo/vector-icons';
 import { Image as ExpoImage } from 'expo-image';
@@ -38,6 +44,8 @@ export default function MarketPlaceModal({
     memories,
     reloadMemories,
 }: Props) {
+    const { theme } = useAppTheme();
+    const styles = useMemo(() => createStyles(theme.colors), [theme.colors]);
     const [screenMode, setScreenMode] = useState<ScreenMode>('list');
     const [selectedPublishLibraryId, setSelectedPublishLibraryId] = useState<string | null>(null);
     const [publishDescription, setPublishDescription] = useState('');
@@ -98,6 +106,16 @@ export default function MarketPlaceModal({
         [selectedPublishMemories]
     );
 
+    const selectedPublishCountryResult = useMemo(
+        () => resolveMarketplaceCountry(selectedPublishMemories),
+        [selectedPublishMemories]
+    );
+
+    const canPublishSelectedLibrary =
+        selectedPublishMemories.length > 0 &&
+        untitledPublishMemoCount === 0 &&
+        selectedPublishCountryResult.ok;
+
     const handleBack = useCallback(() => {
         if (selectedDetails) {
             closeMarketLibrary();
@@ -121,6 +139,10 @@ export default function MarketPlaceModal({
     }, [openMarketLibrary]);
 
     const handleDownload = useCallback(async (libraryId: string) => {
+        if (!userId) {
+            alertRequireSignIn('Sign in to download this library to your memos.');
+            return;
+        }
         const result = await downloadLibrary(libraryId);
         if (result.error) {
             Alert.alert('Download failed', result.error);
@@ -128,7 +150,7 @@ export default function MarketPlaceModal({
         }
 
         Alert.alert('Library downloaded', 'The marketplace library was copied to My Memos.');
-    }, [downloadLibrary]);
+    }, [downloadLibrary, userId]);
 
     const handlePublish = useCallback(async () => {
         if (!selectedPublishLibrary) {
@@ -165,6 +187,7 @@ export default function MarketPlaceModal({
 
     const renderMarketLibrary = ({ item }: { item: MarketLibrary }) => {
         const isDownloaded = downloadedMarketLibraryIds.includes(item.id);
+        const displayCountry = normalizeMarketplaceCountryDisplay(item.country);
 
         return (
             <TouchableOpacity
@@ -175,7 +198,7 @@ export default function MarketPlaceModal({
                     <ExpoImage source={{ uri: item.coverImageUrl }} style={styles.coverImage} contentFit="cover" cachePolicy="memory-disk" />
                 ) : (
                     <View style={[styles.coverImage, styles.coverFallback]}>
-                        <Ionicons name="storefront-outline" size={30} color="#64748b" />
+                        <Ionicons name="storefront-outline" size={30} color={theme.colors.textMuted} />
                     </View>
                 )}
                 <View style={styles.cardBody}>
@@ -194,8 +217,14 @@ export default function MarketPlaceModal({
                     <View style={styles.metaRow}>
                         <Text style={styles.metaText}>{item.photoCount} memo{item.photoCount === 1 ? '' : 's'}</Text>
                         <Text style={styles.metaText}>{item.downloadCount} downloads</Text>
+                        {item.authorUsername ? (
+                            <View style={styles.uploaderChip}>
+                                <Ionicons name="person-outline" size={12} color={theme.colors.textMuted} />
+                                <Text style={styles.uploaderText}>{item.authorUsername}</Text>
+                            </View>
+                        ) : null}
                     </View>
-                    {item.country ? <Text style={styles.countryText}>{item.country}</Text> : null}
+                    {displayCountry ? <Text style={styles.countryText}>{displayCountry}</Text> : null}
                 </View>
             </TouchableOpacity>
         );
@@ -204,6 +233,7 @@ export default function MarketPlaceModal({
     const renderPublishLibrary = ({ item }: { item: CustomFolder }) => {
         const libraryMemories = getLibraryMemories(item.id);
         const untitledCount = libraryMemories.filter(memory => !memory.title?.trim()).length;
+        const countryResult = resolveMarketplaceCountry(libraryMemories);
         const isSelected = item.id === selectedPublishLibraryId;
 
         return (
@@ -212,7 +242,7 @@ export default function MarketPlaceModal({
                 style={[styles.publishLibraryCard, isSelected && styles.publishLibraryCardSelected]}
             >
                 <View style={styles.publishLibraryIcon}>
-                    <Ionicons name={isSelected ? 'radio-button-on' : 'radio-button-off'} size={22} color="#2563eb" />
+                    <Ionicons name={isSelected ? 'radio-button-on' : 'radio-button-off'} size={22} color={theme.colors.accent} />
                 </View>
                 <View style={styles.publishLibraryText}>
                     <Text style={styles.cardTitle}>{item.name}</Text>
@@ -223,6 +253,9 @@ export default function MarketPlaceModal({
                         <Text style={styles.warningText}>
                             {untitledCount} memo{untitledCount === 1 ? '' : 's'} need titles before publishing.
                         </Text>
+                    ) : null}
+                    {!countryResult.ok ? (
+                        <Text style={styles.warningText}>{countryResult.error}</Text>
                     ) : null}
                 </View>
             </TouchableOpacity>
@@ -256,7 +289,7 @@ export default function MarketPlaceModal({
             <SafeAreaView style={styles.screen}>
                 <View style={styles.header}>
                     <TouchableOpacity onPress={handleBack} style={styles.backButton}>
-                        <Ionicons name="chevron-back" size={22} color="#2563eb" />
+                        <Ionicons name="chevron-back" size={22} color={theme.colors.accent} />
                     </TouchableOpacity>
                     <View style={styles.headerText}>
                         <Text style={styles.title} numberOfLines={1}>{headerTitle}</Text>
@@ -281,7 +314,7 @@ export default function MarketPlaceModal({
                                 value={publishDescription}
                                 onChangeText={setPublishDescription}
                                 placeholder="Optional description"
-                                placeholderTextColor="#94a3b8"
+                                placeholderTextColor={theme.colors.placeholder}
                                 multiline
                                 style={styles.descriptionInput}
                             />
@@ -295,7 +328,7 @@ export default function MarketPlaceModal({
                             ))
                         ) : (
                                 <View style={styles.emptyState}>
-                                    <Ionicons name="folder-open-outline" size={40} color="#94a3b8" />
+                                    <Ionicons name="folder-open-outline" size={40} color={theme.colors.textMuted} />
                                     <Text style={styles.emptyTitle}>No owned custom libraries</Text>
                                     <Text style={styles.emptyText}>Create a custom library in My Memos before publishing to the marketplace.</Text>
                                 </View>
@@ -309,12 +342,19 @@ export default function MarketPlaceModal({
                                 {untitledPublishMemoCount > 0 ? (
                                     <Text style={styles.warningText}>All memos need titles before this can be published.</Text>
                                 ) : null}
+                                {!selectedPublishCountryResult.ok ? (
+                                    <Text style={styles.warningText}>{selectedPublishCountryResult.error}</Text>
+                                ) : (
+                                    <Text style={styles.summaryText}>
+                                        Country: {selectedPublishCountryResult.country}
+                                    </Text>
+                                )}
                                 <TouchableOpacity
                                     onPress={() => { void handlePublish(); }}
-                                    disabled={publishingLibraryId !== null || selectedPublishMemories.length === 0 || untitledPublishMemoCount > 0}
+                                    disabled={publishingLibraryId !== null || !canPublishSelectedLibrary}
                                     style={[
                                         styles.primaryButton,
-                                        (publishingLibraryId !== null || selectedPublishMemories.length === 0 || untitledPublishMemoCount > 0) && styles.disabledButton,
+                                        (publishingLibraryId !== null || !canPublishSelectedLibrary) && styles.disabledButton,
                                     ]}
                                 >
                                     {publishingLibraryId ? (
@@ -330,7 +370,7 @@ export default function MarketPlaceModal({
                     <View style={styles.detailContent}>
                         {isLoadingDetails ? (
                             <View style={styles.loadingState}>
-                                <ActivityIndicator size="large" color="#2563eb" />
+                                    <ActivityIndicator size="large" color={theme.colors.accent} />
                                 <Text style={styles.loadingText}>Loading library...</Text>
                             </View>
                         ) : (
@@ -345,7 +385,7 @@ export default function MarketPlaceModal({
                                         />
                                     ) : (
                                         <View style={[styles.detailHeroImage, styles.coverFallback]}>
-                                            <Ionicons name="storefront-outline" size={34} color="#64748b" />
+                                            <Ionicons name="storefront-outline" size={34} color={theme.colors.textMuted} />
                                         </View>
                                     )}
                                     <View style={styles.detailHeroText}>
@@ -355,7 +395,15 @@ export default function MarketPlaceModal({
                                         ) : null}
                                         <Text style={styles.metaText}>
                                             {selectedDetails.library.photoCount} memos · {selectedDetails.library.downloadCount} downloads
+                                            {selectedDetails.library.authorUsername
+                                                ? ` · ${selectedDetails.library.authorUsername}`
+                                                : ''}
                                         </Text>
+                                        {normalizeMarketplaceCountryDisplay(selectedDetails.library.country) ? (
+                                            <Text style={styles.countryText}>
+                                                {normalizeMarketplaceCountryDisplay(selectedDetails.library.country)}
+                                            </Text>
+                                        ) : null}
                                     </View>
                                 </View>
 
@@ -368,6 +416,14 @@ export default function MarketPlaceModal({
                                 />
 
                                 <View style={styles.bottomBar}>
+                                    {selectedDetails.library.authorUsername ? (
+                                        <View style={styles.detailUploaderRow}>
+                                            <Ionicons name="person-outline" size={14} color={theme.colors.textMuted} />
+                                            <Text style={styles.detailUploaderText}>
+                                                Uploaded by {selectedDetails.library.authorUsername}
+                                            </Text>
+                                        </View>
+                                    ) : null}
                                     <TouchableOpacity
                                         onPress={() => { void handleDownload(selectedDetails.library.id); }}
                                         disabled={selectedLibraryIsDownloading || selectedLibraryAlreadyDownloaded}
@@ -381,7 +437,9 @@ export default function MarketPlaceModal({
                                         ) : selectedLibraryAlreadyDownloaded ? (
                                             <Text style={styles.primaryButtonText}>Already Downloaded</Text>
                                         ) : (
-                                            <Text style={styles.primaryButtonText}>Download Library</Text>
+                                            <Text style={styles.primaryButtonText}>
+                                                {!userId ? 'Sign in to download' : 'Download Library'}
+                                            </Text>
                                         )}
                                     </TouchableOpacity>
                                 </View>
@@ -390,7 +448,7 @@ export default function MarketPlaceModal({
                     </View>
                 ) : isLoading && marketLibraries.length === 0 ? (
                     <View style={styles.loadingState}>
-                        <ActivityIndicator size="large" color="#2563eb" />
+                        <ActivityIndicator size="large" color={theme.colors.accent} />
                         <Text style={styles.loadingText}>Loading marketplace...</Text>
                     </View>
                 ) : (
@@ -408,7 +466,7 @@ export default function MarketPlaceModal({
                                     value={countryInput}
                                     onChangeText={setCountryInput}
                                     placeholder="Filter by country"
-                                    placeholderTextColor="#94a3b8"
+                                    placeholderTextColor={theme.colors.placeholder}
                                     style={styles.countryInput}
                                     returnKeyType="search"
                                     onSubmitEditing={handleApplyCountryFilter}
@@ -425,7 +483,7 @@ export default function MarketPlaceModal({
                         }
                         ListEmptyComponent={
                             <View style={styles.emptyState}>
-                                <Ionicons name="storefront-outline" size={40} color="#94a3b8" />
+                                <Ionicons name="storefront-outline" size={40} color={theme.colors.textMuted} />
                                 <Text style={styles.emptyTitle}>No marketplace posts yet</Text>
                                 <Text style={styles.emptyText}>Publish one of your custom libraries to start the marketplace.</Text>
                             </View>
@@ -437,10 +495,12 @@ export default function MarketPlaceModal({
     );
 }
 
-const styles = StyleSheet.create({
+type ThemeColors = ReturnType<typeof useAppTheme>['theme']['colors'];
+
+const createStyles = (colors: ThemeColors) => StyleSheet.create({
     screen: {
         flex: 1,
-        backgroundColor: '#f8fafc',
+        backgroundColor: colors.background,
     },
     header: {
         flexDirection: 'row',
@@ -453,11 +513,11 @@ const styles = StyleSheet.create({
         width: 42,
         height: 42,
         borderRadius: 21,
-        backgroundColor: 'white',
+        backgroundColor: colors.surface,
         alignItems: 'center',
         justifyContent: 'center',
         borderWidth: 1,
-        borderColor: '#dbe4ea',
+        borderColor: colors.border,
     },
     headerText: {
         flex: 1,
@@ -466,12 +526,12 @@ const styles = StyleSheet.create({
     title: {
         fontSize: 24,
         fontWeight: '800',
-        color: '#0f172a',
+        color: colors.text,
     },
     subtitle: {
         marginTop: 4,
         fontSize: 14,
-        color: '#64748b',
+        color: colors.textMuted,
     },
     headerAction: {
         flexDirection: 'row',
@@ -493,7 +553,7 @@ const styles = StyleSheet.create({
     },
     loadingText: {
         marginTop: 12,
-        color: '#64748b',
+        color: colors.textMuted,
         fontSize: 15,
     },
     listContent: {
@@ -512,10 +572,10 @@ const styles = StyleSheet.create({
         height: 46,
         borderRadius: 14,
         borderWidth: 1,
-        borderColor: '#dbe4ea',
-        backgroundColor: 'white',
+        borderColor: colors.border,
+        backgroundColor: colors.input,
         paddingHorizontal: 14,
-        color: '#0f172a',
+        color: colors.text,
     },
     filterButton: {
         height: 46,
@@ -533,15 +593,15 @@ const styles = StyleSheet.create({
         width: 46,
         height: 46,
         borderRadius: 14,
-        backgroundColor: '#e2e8f0',
+        backgroundColor: colors.surfaceMuted,
         alignItems: 'center',
         justifyContent: 'center',
     },
     card: {
-        backgroundColor: 'white',
+        backgroundColor: colors.surface,
         borderRadius: 22,
         padding: 14,
-        shadowColor: '#000',
+        shadowColor: colors.shadow,
         shadowOpacity: 0.06,
         shadowRadius: 10,
         elevation: 2,
@@ -550,7 +610,7 @@ const styles = StyleSheet.create({
         width: '100%',
         height: 170,
         borderRadius: 18,
-        backgroundColor: '#e2e8f0',
+        backgroundColor: colors.surfaceMuted,
     },
     coverFallback: {
         alignItems: 'center',
@@ -569,7 +629,7 @@ const styles = StyleSheet.create({
         flex: 1,
         fontSize: 17,
         fontWeight: '800',
-        color: '#0f172a',
+        color: colors.text,
     },
     downloadedBadge: {
         flexDirection: 'row',
@@ -588,25 +648,41 @@ const styles = StyleSheet.create({
     cardDescription: {
         marginTop: 6,
         fontSize: 14,
-        color: '#64748b',
+        color: colors.textMuted,
         lineHeight: 20,
     },
     metaRow: {
         flexDirection: 'row',
+        flexWrap: 'wrap',
+        alignItems: 'center',
         gap: 12,
         marginTop: 10,
     },
     metaText: {
         fontSize: 13,
-        color: '#64748b',
+        color: colors.textMuted,
         fontWeight: '600',
+    },
+    uploaderChip: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 4,
+        borderRadius: 999,
+        backgroundColor: colors.surfaceMuted,
+        paddingHorizontal: 8,
+        paddingVertical: 4,
+    },
+    uploaderText: {
+        fontSize: 12,
+        color: colors.textMuted,
+        fontWeight: '700',
     },
     countryText: {
         alignSelf: 'flex-start',
         marginTop: 10,
         borderRadius: 999,
-        backgroundColor: '#dbeafe',
-        color: '#1d4ed8',
+        backgroundColor: colors.accentSoft,
+        color: colors.accentText,
         overflow: 'hidden',
         paddingHorizontal: 10,
         paddingVertical: 5,
@@ -622,13 +698,13 @@ const styles = StyleSheet.create({
         marginBottom: 12,
         borderRadius: 22,
         padding: 14,
-        backgroundColor: 'white',
+        backgroundColor: colors.surface,
     },
     detailHeroImage: {
         width: 94,
         height: 94,
         borderRadius: 20,
-        backgroundColor: '#e2e8f0',
+        backgroundColor: colors.surfaceMuted,
     },
     detailHeroText: {
         flex: 1,
@@ -638,11 +714,11 @@ const styles = StyleSheet.create({
     detailTitle: {
         fontSize: 18,
         fontWeight: '800',
-        color: '#0f172a',
+        color: colors.text,
     },
     detailDescription: {
         marginTop: 6,
-        color: '#64748b',
+        color: colors.textMuted,
         lineHeight: 20,
     },
     photoGrid: {
@@ -653,17 +729,17 @@ const styles = StyleSheet.create({
         flex: 1,
         margin: 6,
         borderRadius: 18,
-        backgroundColor: 'white',
+        backgroundColor: colors.surface,
         overflow: 'hidden',
     },
     photoImage: {
         width: '100%',
         height: 130,
-        backgroundColor: '#e2e8f0',
+        backgroundColor: colors.surfaceMuted,
     },
     photoTitle: {
         padding: 10,
-        color: '#0f172a',
+        color: colors.text,
         fontWeight: '700',
     },
     bottomBar: {
@@ -672,9 +748,21 @@ const styles = StyleSheet.create({
         right: 0,
         bottom: 0,
         padding: 16,
-        backgroundColor: 'rgba(248, 250, 252, 0.96)',
+        gap: 10,
+        backgroundColor: colors.surface,
         borderTopWidth: 1,
-        borderTopColor: '#e2e8f0',
+        borderTopColor: colors.border,
+    },
+    detailUploaderRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: 6,
+    },
+    detailUploaderText: {
+        fontSize: 13,
+        color: colors.textMuted,
+        fontWeight: '700',
     },
     primaryButton: {
         minHeight: 50,
@@ -700,16 +788,16 @@ const styles = StyleSheet.create({
     panel: {
         borderRadius: 22,
         padding: 16,
-        backgroundColor: 'white',
+        backgroundColor: colors.surface,
     },
     panelTitle: {
         fontSize: 17,
         fontWeight: '800',
-        color: '#0f172a',
+        color: colors.text,
     },
     panelText: {
         marginTop: 6,
-        color: '#64748b',
+        color: colors.textMuted,
         lineHeight: 20,
     },
     descriptionInput: {
@@ -717,9 +805,10 @@ const styles = StyleSheet.create({
         marginTop: 14,
         borderRadius: 16,
         borderWidth: 1,
-        borderColor: '#dbe4ea',
+        borderColor: colors.border,
         padding: 12,
-        color: '#0f172a',
+        color: colors.text,
+        backgroundColor: colors.input,
         textAlignVertical: 'top',
     },
     publishLibraryCard: {
@@ -727,14 +816,14 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         borderRadius: 20,
         padding: 14,
-        backgroundColor: 'white',
+        backgroundColor: colors.surface,
         borderWidth: 1,
         borderColor: 'transparent',
         marginBottom: 10,
     },
     publishLibraryCardSelected: {
-        borderColor: '#2563eb',
-        backgroundColor: '#eff6ff',
+        borderColor: colors.accent,
+        backgroundColor: colors.accentSoft,
     },
     publishLibraryIcon: {
         marginRight: 12,
@@ -751,11 +840,11 @@ const styles = StyleSheet.create({
     publishSummary: {
         borderRadius: 22,
         padding: 16,
-        backgroundColor: 'white',
+        backgroundColor: colors.surface,
         gap: 12,
     },
     summaryText: {
-        color: '#334155',
+        color: colors.textSecondary,
         fontWeight: '700',
     },
     emptyContainer: {
@@ -765,7 +854,7 @@ const styles = StyleSheet.create({
     },
     emptyState: {
         alignItems: 'center',
-        backgroundColor: 'white',
+        backgroundColor: colors.surface,
         borderRadius: 24,
         padding: 28,
     },
@@ -773,13 +862,13 @@ const styles = StyleSheet.create({
         marginTop: 14,
         fontSize: 18,
         fontWeight: '700',
-        color: '#0f172a',
+        color: colors.text,
         textAlign: 'center',
     },
     emptyText: {
         marginTop: 8,
         fontSize: 14,
-        color: '#64748b',
+        color: colors.textMuted,
         textAlign: 'center',
         lineHeight: 21,
     },

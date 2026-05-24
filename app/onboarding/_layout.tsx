@@ -1,61 +1,102 @@
-import { AntDesign, Ionicons } from "@expo/vector-icons";
-import { Tabs, useRouter } from "expo-router";
-import { Alert } from "react-native";
-import { useAuth } from '../../context/AuthContext';
-import { useMemories } from '../../context/MemoryContext';
+import { LibrariesOverlayProvider, useLibrariesOverlay } from '@/context/LibrariesOverlayContext';
+import { useMemories } from '@/context/MemoryContext';
+import { useAppTheme } from '@/context/ThemeContext';
+import { AntDesign, Ionicons } from '@expo/vector-icons';
+import * as Haptics from 'expo-haptics';
+import { Tabs, useRouter } from 'expo-router';
 
-export default function OnboardingLayout() {
+function OnboardingTabs() {
     const { addMemory } = useMemories();
-    const { user } = useAuth();
+    const { theme } = useAppTheme();
     const router = useRouter();
+    const { visible: librariesOverlayVisible, open: openLibrariesOverlay } = useLibrariesOverlay();
 
     return (
-        <Tabs screenOptions={{ tabBarActiveTintColor: '#3B82F6' }}>
+        <Tabs
+            screenOptions={{
+                tabBarActiveTintColor: theme.colors.accent,
+                tabBarInactiveTintColor: theme.colors.tabInactive,
+                headerShown: false,
+                tabBarStyle: {
+                    position: 'absolute',
+                    left: 0,
+                    right: 0,
+                    bottom: 0,
+                    backgroundColor: theme.colors.surface,
+                    borderTopColor: theme.colors.border,
+                    opacity: librariesOverlayVisible ? 0 : 1,
+                    pointerEvents: librariesOverlayVisible ? 'none' : 'auto',
+                },
+            }}
+            screenListeners={{
+                tabPress: () => {
+                    void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+                },
+            }}
+        >
             <Tabs.Screen
                 name="info"
                 options={{
-                    title: "Info",
-                    tabBarIcon: ({ color }) => <Ionicons name="information-circle" size={24} color={color} />,
+                    title: 'Info',
+                    href: null,
                 }}
             />
             <Tabs.Screen
                 name="TakePicture"
                 options={{
-                    title: "Take Photo",
+                    title: 'Take Photo',
                     tabBarIcon: ({ color }) => <AntDesign name="camera" size={24} color={color} />,
                 }}
                 listeners={{
                     tabPress: (e) => {
                         e.preventDefault();
-                        if (!user) {
-                            Alert.alert(
-                                'Sign in required',
-                                'Sign in to capture and save memories.',
-                                [
-                                    { text: 'Cancel', style: 'cancel' },
-                                    { text: 'Sign in', onPress: () => router.push('/Login') },
-                                ],
-                            );
-                            return;
-                        }
                         void addMemory();
+                    },
+                }}
+            />
+            <Tabs.Screen
+                name="Home"
+                options={{
+                    title: 'Map',
+                    tabBarIcon: ({ color }) => <Ionicons name="home" size={24} color={color} />,
+                }}
+            />
+            <Tabs.Screen
+                name="libraries"
+                options={{
+                    title: 'Libraries',
+                    tabBarIcon: ({ color }) => <Ionicons name="albums-outline" size={24} color={color} />,
+                }}
+                listeners={{
+                    tabPress: (e) => {
+                        e.preventDefault();
+                        router.replace('/onboarding/Home');
+                        openLibrariesOverlay();
                     },
                 }}
             />
             <Tabs.Screen
                 name="plan"
                 options={{
-                    title: "Plan",
-                    tabBarIcon: ({ color }) => <Ionicons name="calendar-outline" size={24} color={color} />,
+                    title: 'Plan',
+                    href: null,
                 }}
             />
             <Tabs.Screen
-                name="Home"
+                name="video-import"
                 options={{
-                    title: "Map",
-                    tabBarIcon: ({ color }) => <Ionicons name="home" size={24} color={color} />,
+                    title: 'Import',
+                    tabBarIcon: ({ color }) => <Ionicons name="film-outline" size={24} color={color} />,
                 }}
             />
         </Tabs>
+    );
+}
+
+export default function OnboardingLayout() {
+    return (
+        <LibrariesOverlayProvider>
+            <OnboardingTabs />
+        </LibrariesOverlayProvider>
     );
 }

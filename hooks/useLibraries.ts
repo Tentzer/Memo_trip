@@ -3,6 +3,7 @@ import { Alert } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
 import { User } from '@supabase/supabase-js';
 import { uploadLibraryCover } from '@/lib/memoryApi';
+import { revokeMarketLibraryDownload } from '@/lib/marketplaceApi';
 import { supabase } from '@/lib/supabase';
 import { Memory, CustomFolder } from '@/types/memory';
 import { loadMemoryMeta, saveMemoryMeta } from '@/lib/memoryStorage';
@@ -105,6 +106,15 @@ export function useLibraries({
             return { success: false, message: 'Library not found.' };
         }
 
+        /** Marketplace downloads live only in their library (excludeFromCountryFolder). */
+        const orphanMarketplaceMemoIds = memoriesRef.current
+            .filter(m => !m.deletedAt && m.customFolderIds.includes(folderId))
+            .filter(m => {
+                const remainingFolderIds = m.customFolderIds.filter(id => id !== folderId);
+                return remainingFolderIds.length === 0 && m.excludeFromCountryFolder === true;
+            })
+            .map(m => m.id);
+
         if (targetFolder.role === 'owner') {
             const { data: otherMembers, error: membersError } = await supabase
                 .from('library_members')
@@ -156,6 +166,11 @@ export function useLibraries({
                 if (deleteLibraryError) {
                     return { success: false, message: deleteLibraryError.message };
                 }
+
+                const revokeResult = await revokeMarketLibraryDownload(folderId);
+                if (revokeResult.error) {
+                    return { success: false, message: revokeResult.error };
+                }
             }
         } else {
             const { error: removeMembershipError } = await supabase
@@ -175,10 +190,30 @@ export function useLibraries({
             delete next[folderId];
             return next;
         });
-        setMemories(prev => prev.map(m => ({
-            ...m,
-            customFolderIds: m.customFolderIds.filter(id => id !== folderId),
-        })));
+
+        const archivedAt = orphanMarketplaceMemoIds.length > 0
+            ? new Date().toISOString()
+            : null;
+
+        if (archivedAt) {
+            const { error: archiveError } = await supabase
+                .from('memories')
+                .update({ deleted_at: archivedAt })
+                .in('id', orphanMarketplaceMemoIds)
+                .eq('user_id', user.id);
+
+            if (archiveError) {
+                return { success: false, message: archiveError.message };
+            }
+        }
+
+        setMemories(prev => prev.map(m => {
+            const customFolderIds = m.customFolderIds.filter(id => id !== folderId);
+            if (archivedAt && orphanMarketplaceMemoIds.includes(m.id)) {
+                return { ...m, customFolderIds, deletedAt: archivedAt };
+            }
+            return { ...m, customFolderIds };
+        }));
 
         const storedMeta = await loadMemoryMeta(user.id);
         const nextMeta = Object.entries(storedMeta).reduce<Record<string, typeof storedMeta[string]>>(
@@ -246,6 +281,80 @@ export function useLibraries({
         });
     }, [user, memoriesRef, customFoldersRef, setMemories]);
 
+    const addMemoriesToCustomFolder = useCallback(async (
+        memoryIds: string[],
+        folderId: string,
+    ): Promise<{ added: number; skipped: number; error?: string }> => {
+        if (!user?.id) {
+            return { added: 0, skipped: memoryIds.length, error: 'You need to be signed in to add memos to a library.' };
+        }
+
+        const targetFolder = customFoldersRef.current.find(f => f.id === folderId);
+        if (!targetFolder) {
+            return { added: 0, skipped: memoryIds.length, error: 'Library not found.' };
+        }
+
+        const canCurate = targetFolder.role === 'owner' || targetFolder.role === 'editor';
+        if (!canCurate) {
+            return { added: 0, skipped: memoryIds.length, error: 'You do not have permission to edit this shared library.' };
+        }
+
+        const toAdd: Memory[] = [];
+        let skipped = 0;
+
+        for (const memoryId of [...new Set(memoryIds)]) {
+            const memory = memoriesRef.current.find(m => m.id === memoryId);
+            if (!memory || memory.deletedAt || memory.isShared) {
+                skipped += 1;
+                continue;
+            }
+            if (memory.customFolderIds.includes(folderId)) {
+                skipped += 1;
+                continue;
+            }
+            toAdd.push(memory);
+        }
+
+        if (toAdd.length === 0) {
+            return { added: 0, skipped };
+        }
+
+        const rows = toAdd.map(memory => ({
+            library_id: folderId,
+            memo_id: memory.id,
+            added_by: user.id,
+        }));
+
+        const { error } = await supabase.from('library_memos').upsert(rows, {
+            onConflict: 'library_id,memo_id',
+            ignoreDuplicates: true,
+        });
+
+        if (error) {
+            return { added: 0, skipped, error: error.message };
+        }
+
+        setMemories(prev => prev.map(memory => {
+            if (!toAdd.some(candidate => candidate.id === memory.id)) return memory;
+            return { ...memory, customFolderIds: [...memory.customFolderIds, folderId] };
+        }));
+
+        const storedMeta = await loadMemoryMeta(user.id);
+        const nextMeta = { ...storedMeta };
+        for (const memory of toAdd) {
+            nextMeta[memory.id] = {
+                country: memory.country,
+                title: memory.title,
+                description: memory.description,
+                customFolderIds: [...memory.customFolderIds, folderId],
+                excludeFromCountryFolder: memory.excludeFromCountryFolder ?? false,
+            };
+        }
+        await saveMemoryMeta(user.id, nextMeta);
+
+        return { added: toAdd.length, skipped };
+    }, [user, memoriesRef, customFoldersRef, setMemories]);
+
     const updateCustomFolderCover = useCallback(async (folderId: string): Promise<{ success: boolean; message?: string }> => {
         if (!user?.id) {
             return { success: false, message: 'You need to be logged in to update a library cover.' };
@@ -310,5 +419,12 @@ export function useLibraries({
         return { success: true };
     }, [user, customFoldersRef, setCustomFolders]);
 
-    return { getLibraryMemories, createCustomFolder, removeLibrary, toggleMemoryInCustomFolder, updateCustomFolderCover };
+    return {
+        getLibraryMemories,
+        createCustomFolder,
+        removeLibrary,
+        toggleMemoryInCustomFolder,
+        addMemoriesToCustomFolder,
+        updateCustomFolderCover,
+    };
 }

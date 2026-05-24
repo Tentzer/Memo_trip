@@ -1,0 +1,98 @@
+﻿{
+    "title":  "Video by theburgerreviews",
+    "description":  "Rome Food Tour ð®ð¹\n\n#romefood #rome #food #italian #italianfood #italy #pasta #burger #burgers",
+    "platform":  "instagram",
+    "text":  " What I ate in what many people claim is the food capital of the world. From homemade pasta served directly to your plate, to the best burgers of the entire city. But we kick off with what many say is the best sandwich on the entire planet. La Vita e un Mozica. Where they don\u0027t have a menu, but simply ask you what you like to eat. Before building your very own custom sandwich. Wrapped in homemade focaccia. This is quite simply the best sandwich I have ever eaten. Next is La Taverna 29, where the old school Italian chef would directly serve the pasta from his pan to your plate. I ordered the penne alla vodka, the tortellini ragu, and finally the truffle ravioli. They then brought us two tiramisu\u0027s on the house. I was then back on the quest to find the best sandwich in Italy, hitting up the famous Al Antico Vinaigre. All the meats and cheeses are so incredibly pure and fresh but it\u0027s all about the focaccia bread that takes it from amazing to elite. Next we went off the grid at Osterie. This place is as old-school as it gets. It doesn\u0027t even have social media. Ordering bruschetta, penne arrabbiata and fresh lemon chicken with roast potatoes. For breakfast we love acai balls and we found the best in the city so you don\u0027t have to. At Esco Sazio and Ginger in the fashion district. However this place is insanely lavish so make sure you dress nice. Now most people would hit up the best pizza in the city but this is a burger page and I was on the hunt to find the best burger Romeome had to offer first was don\u0027ts with a classic smash burger in a potato bowl and next was hamburgia starting off with the panko",
+    "segments":  null,
+    "places":  [
+                   {
+                       "name":  "La Vita e un Mozica",
+                       "address":  null,
+                       "city":  "Rome",
+                       "country":  "Italy",
+                       "category":  "restaurant",
+                       "maps_search_hint":  "La Vita e un Mozica Rome",
+                       "evidence_quote":  "La Vita e un Mozica. Where they don\u0027t have a menu, but simply ask you what you like to eat.",
+                       "confidence":  "high",
+                       "notes":  null
+                   },
+                   {
+                       "name":  "La Taverna 29",
+                       "address":  null,
+                       "city":  "Rome",
+                       "country":  "Italy",
+                       "category":  "restaurant",
+                       "maps_search_hint":  "La Taverna 29 Rome",
+                       "evidence_quote":  "Next is La Taverna 29, where the old school Italian chef would directly serve the pasta from his pan to your plate.",
+                       "confidence":  "high",
+                       "notes":  null
+                   },
+                   {
+                       "name":  "Al Antico Vinaigre",
+                       "address":  null,
+                       "city":  "Rome",
+                       "country":  "Italy",
+                       "category":  "restaurant",
+                       "maps_search_hint":  "Al Antico Vinaigre Rome",
+                       "evidence_quote":  "hitting up the famous Al Antico Vinaigre.",
+                       "confidence":  "high",
+                       "notes":  "Potentially a misspelling of \u0027All\u0027Antico Vinaio\u0027."
+                   },
+                   {
+                       "name":  "Osterie",
+                       "address":  null,
+                       "city":  "Rome",
+                       "country":  "Italy",
+                       "category":  "restaurant",
+                       "maps_search_hint":  "Osterie Rome",
+                       "evidence_quote":  "Next we went off the grid at Osterie. This place is as old-school as it gets. It doesn\u0027t even have social media.",
+                       "confidence":  "medium",
+                       "notes":  "The name \u0027Osterie\u0027 is a plural Italian word for \u0027taverns\u0027 or \u0027inns\u0027, making it potentially difficult to search for a specific establishment without more details."
+                   },
+                   {
+                       "name":  "Esco Sazio",
+                       "address":  null,
+                       "city":  "Rome",
+                       "country":  "Italy",
+                       "category":  "cafe",
+                       "maps_search_hint":  "Esco Sazio Rome fashion district",
+                       "evidence_quote":  "At Esco Sazio and Ginger in the fashion district.",
+                       "confidence":  "high",
+                       "notes":  null
+                   },
+                   {
+                       "name":  "Ginger",
+                       "address":  null,
+                       "city":  "Rome",
+                       "country":  "Italy",
+                       "category":  "cafe",
+                       "maps_search_hint":  "Ginger Rome fashion district",
+                       "evidence_quote":  "At Esco Sazio and Ginger in the fashion district.",
+                       "confidence":  "high",
+                       "notes":  null
+                   },
+                   {
+                       "name":  "don\u0027ts",
+                       "address":  null,
+                       "city":  "Rome",
+                       "country":  "Italy",
+                       "category":  "restaurant",
+                       "maps_search_hint":  "don\u0027ts burger Rome",
+                       "evidence_quote":  "first was don\u0027ts with a classic smash burger in a potato bowl",
+                       "confidence":  "high",
+                       "notes":  null
+                   },
+                   {
+                       "name":  "hamburgia",
+                       "address":  null,
+                       "city":  "Rome",
+                       "country":  "Italy",
+                       "category":  "restaurant",
+                       "maps_search_hint":  "hamburgia burger Rome",
+                       "evidence_quote":  "and next was hamburgia starting off with the panko",
+                       "confidence":  "high",
+                       "notes":  null
+                   }
+               ],
+    "agent_summary":  "The video features a food tour in Rome, Italy, highlighting several restaurants and cafes. These include sandwich shops like La Vita e un Mozica and Al Antico Vinaigre, pasta restaurants like La Taverna 29 and Osterie, acai bowl cafes Esco Sazio and Ginger in the fashion district, and burger joints don\u0027ts and hamburgia."
+}

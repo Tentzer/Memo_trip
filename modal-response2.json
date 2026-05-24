@@ -1,0 +1,130 @@
+﻿{
+    "title":  "Video by the_imperfect_tourist",
+    "description":  "ð®ð¹ 10 Best Pasta Places in Rome Loved by Locals â¨\n\n1. ð Trattoria Vecchia Roma (Esquilino)\nA true Roman institution famous for its bucatini allâamatriciana and carbonara, flambÃ©ed in pecorino cheese right at your table â pure local flavor! ð¥ð§\n\n2. ð· Osteria da Fortunata (Campo deâ Fiori / Trastevere)\nHandmade pasta rolled fresh right in front of you! Known for its silky tonnarelli cacio e pepe and hearty pasta alla gricia. ð©âð³ð\n\n3. ð Flavio al Velavevodetto (Testaccio)\nA favorite among Romans, this spot is tucked in a hill of ancient amphorae and serves arguably the best carbonara in the city. ð¥ð·\n\n4. ð Osteria Bonelli (San Giovanni)\nA humble, no-frills trattoria where locals dine on fresh pasta of the day and seasonal Roman comfort food. ðð\u0085\n\n5. ð Al Pompiere (Centro Storico)\nOne of the oldest trattorias in Rome, known for authentic pasta alla gricia and a loyal local clientele whoâve eaten here for decades. ð°ï¸ð\n\n6. ð La Fiaschetta (Campo deâ Fiori)\nCozy and quiet, perfect for pasta alla carbonara or cacio e pepe with a good local wine â simple, honest, delicious. ð·ð¥\n\n7. ð Gino al Parlamento (Montecitorio)\nBeloved for its traditional dishes and warm atmosphere â a local gem serving tonnarelli alla gricia and saltimbocca alla romana. ð®ð¹â¨\n\n8. ð Cantina e Cucina (Centro Storico)\nRustic and laid-back with handmade pasta fresca, cheerful service, and an easy-going Roman feel â popular with locals and expats alike. ð½ï¸ð\n\n9. ð Trattoria Pennestri (Ostiense)\nA creative twist on Roman classics, offering dishes like wild boar ragÃ¹ cannelloni and truffle pasta in a cozy neighborhood setting. ðð·\n\n10. ð La Taverna dei Fori Imperiali (Near Roman Forum)\nFamily-run trattoria known for tagliolini al tartufo and carbonara, blending tradition with a warm local atmosphere. ðï¸ð¨âð©âð§âð¦\n\n#romeeats #local #pastalovers #romefoodie #italy #romancuisine #discoverrome #travel #italianfood #italianpasta #bestpasta #osteria #traveling #rome #carbonara #amatriciana #tomato #trattoria",
+    "platform":  "instagram",
+    "text":  " Ciao ItalÃ¬, pizze, spaghetti e gatti sui tetti ma anche nostalgia, piena di sole quel po\u0027 che ci vuole di malinconia, ti amo cosÃ¬, bella ItalÃ¬. Ciao amore, ci vediamo in ItalÃ¬, ciao amore.",
+    "segments":  null,
+    "places":  [
+                   {
+                       "name":  "Trattoria Vecchia Roma",
+                       "address":  "Esquilino",
+                       "full_address":  "Trattoria Vecchia Roma, Rome, Italy",
+                       "city":  "Rome",
+                       "country":  "Italy",
+                       "category":  "restaurant",
+                       "maps_search_hint":  "Trattoria Vecchia Roma, Rome, Italy",
+                       "evidence_quote":  "1. ð Trattoria Vecchia Roma (Esquilino) A true Roman institution famous for its bucatini allâamatriciana and carbonara...",
+                       "confidence":  "high",
+                       "notes":  null
+                   },
+                   {
+                       "name":  "Osteria da Fortunata",
+                       "address":  "Campo deâ Fiori / Trastevere",
+                       "full_address":  "Osteria da Fortunata, Rome, Italy",
+                       "city":  "Rome",
+                       "country":  "Italy",
+                       "category":  "restaurant",
+                       "maps_search_hint":  "Osteria da Fortunata, Rome, Italy",
+                       "evidence_quote":  "2. ð· Osteria da Fortunata (Campo deâ Fiori / Trastevere) Handmade pasta rolled fresh right in front of you!",
+                       "confidence":  "high",
+                       "notes":  null
+                   },
+                   {
+                       "name":  "Flavio al Velavevodetto",
+                       "address":  "Testaccio",
+                       "full_address":  "Flavio al Velavevodetto, Rome, Italy",
+                       "city":  "Rome",
+                       "country":  "Italy",
+                       "category":  "restaurant",
+                       "maps_search_hint":  "Flavio al Velavevodetto, Rome, Italy",
+                       "evidence_quote":  "3. ð Flavio al Velavevodetto (Testaccio) A favorite among Romans, this spot is tucked in a hill of ancient amphorae...",
+                       "confidence":  "high",
+                       "notes":  null
+                   },
+                   {
+                       "name":  "Osteria Bonelli",
+                       "address":  "San Giovanni",
+                       "full_address":  "Osteria Bonelli, Rome, Italy",
+                       "city":  "Rome",
+                       "country":  "Italy",
+                       "category":  "restaurant",
+                       "maps_search_hint":  "Osteria Bonelli, Rome, Italy",
+                       "evidence_quote":  "4. ð Osteria Bonelli (San Giovanni) A humble, no-frills trattoria where locals dine on fresh pasta of the day...",
+                       "confidence":  "high",
+                       "notes":  null
+                   },
+                   {
+                       "name":  "Al Pompiere",
+                       "address":  "Centro Storico",
+                       "full_address":  "Al Pompiere, Rome, Italy",
+                       "city":  "Rome",
+                       "country":  "Italy",
+                       "category":  "restaurant",
+                       "maps_search_hint":  "Al Pompiere, Rome, Italy",
+                       "evidence_quote":  "5. ð Al Pompiere (Centro Storico) One of the oldest trattorias in Rome, known for authentic pasta alla gricia...",
+                       "confidence":  "high",
+                       "notes":  null
+                   },
+                   {
+                       "name":  "La Fiaschetta",
+                       "address":  "Campo deâ Fiori",
+                       "full_address":  "La Fiaschetta, Rome, Italy",
+                       "city":  "Rome",
+                       "country":  "Italy",
+                       "category":  "restaurant",
+                       "maps_search_hint":  "La Fiaschetta, Rome, Italy",
+                       "evidence_quote":  "6. ð La Fiaschetta (Campo deâ Fiori) Cozy and quiet, perfect for pasta alla carbonara or cacio e pepe...",
+                       "confidence":  "high",
+                       "notes":  null
+                   },
+                   {
+                       "name":  "Gino al Parlamento",
+                       "address":  "Montecitorio",
+                       "full_address":  "Gino al Parlamento, Rome, Italy",
+                       "city":  "Rome",
+                       "country":  "Italy",
+                       "category":  "restaurant",
+                       "maps_search_hint":  "Gino al Parlamento, Rome, Italy",
+                       "evidence_quote":  "7. ð Gino al Parlamento (Montecitorio) Beloved for its traditional dishes and warm atmosphere...",
+                       "confidence":  "high",
+                       "notes":  null
+                   },
+                   {
+                       "name":  "Cantina e Cucina",
+                       "address":  "Centro Storico",
+                       "full_address":  "Cantina e Cucina, Rome, Italy",
+                       "city":  "Rome",
+                       "country":  "Italy",
+                       "category":  "restaurant",
+                       "maps_search_hint":  "Cantina e Cucina, Rome, Italy",
+                       "evidence_quote":  "8. ð Cantina e Cucina (Centro Storico) Rustic and laid-back with handmade pasta fresca, cheerful service...",
+                       "confidence":  "high",
+                       "notes":  null
+                   },
+                   {
+                       "name":  "Trattoria Pennestri",
+                       "address":  "Ostiense",
+                       "full_address":  "Trattoria Pennestri, Rome, Italy",
+                       "city":  "Rome",
+                       "country":  "Italy",
+                       "category":  "restaurant",
+                       "maps_search_hint":  "Trattoria Pennestri, Rome, Italy",
+                       "evidence_quote":  "9. ð Trattoria Pennestri (Ostiense) A creative twist on Roman classics, offering dishes like wild boar ragÃ¹ cannelloni...",
+                       "confidence":  "high",
+                       "notes":  null
+                   },
+                   {
+                       "name":  "La Taverna dei Fori Imperiali",
+                       "address":  "Near Roman Forum",
+                       "full_address":  "La Taverna dei Fori Imperiali, Rome, Italy",
+                       "city":  "Rome",
+                       "country":  "Italy",
+                       "category":  "restaurant",
+                       "maps_search_hint":  "La Taverna dei Fori Imperiali, Rome, Italy",
+                       "evidence_quote":  "10. ð La Taverna dei Fori Imperiali (Near Roman Forum) Family-run trattoria known for tagliolini al tartufo...",
+                       "confidence":  "high",
+                       "notes":  null
+                   }
+               ],
+    "agent_summary":  "Extracted 10 pasta restaurants in Rome, Italy, directly from the video description which explicitly listed them as \u002710 Best Pasta Places in Rome Loved by Locals\u0027."
+}

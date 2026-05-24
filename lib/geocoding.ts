@@ -51,6 +51,58 @@ export function getFolderNameFromGoogleAddressComponents(
     return countryName ? normalizeLocationFolderName(countryName) : '';
 }
 
+let englishRegionDisplay: Intl.DisplayNames | undefined;
+
+function getEnglishRegionDisplay(): Intl.DisplayNames | null {
+    if (englishRegionDisplay) return englishRegionDisplay;
+
+    try {
+        if (typeof Intl === 'undefined' || typeof Intl.DisplayNames !== 'function') {
+            return null;
+        }
+        englishRegionDisplay = new Intl.DisplayNames(['en'], { type: 'region' });
+        return englishRegionDisplay;
+    } catch {
+        return null;
+    }
+}
+
+function getEnglishCountryFromIsoCode(isoCountryCode: string): string | null {
+    const code = isoCountryCode.trim().toUpperCase();
+    if (!code) return null;
+
+    const display = getEnglishRegionDisplay();
+    if (!display) return null;
+
+    try {
+        const name = display.of(code);
+        if (!name || name === code) return null;
+        return normalizeLocationFolderName(name);
+    } catch {
+        return null;
+    }
+}
+
+async function getEnglishLocationFromCoords(
+    latitude: number,
+    longitude: number,
+): Promise<{ country: string | null; subdivision: string | null }> {
+    try {
+        const response = await fetch(
+            `https://api.bigdatacloud.net/data/reverse-geocode-client?latitude=${latitude}&longitude=${longitude}&localityLanguage=en`
+        );
+        const data = await response.json();
+        const country = data.countryName?.trim();
+        const subdivision = data.principalSubdivision?.trim();
+        return {
+            country: country ? normalizeLocationFolderName(country) : null,
+            subdivision: subdivision ? normalizeLocationFolderName(subdivision) : null,
+        };
+    } catch {
+        return { country: null, subdivision: null };
+    }
+}
+
 /**
  * Human-readable postal-style address from coordinates (Expo reverse geocode).
  */
@@ -118,9 +170,24 @@ export async function getCountryNameFromCoords(latitude: number, longitude: numb
         const r = results[0];
         if (!r) return 'Unknown Location';
 
+        const isoCountryCode = r.isoCountryCode?.trim().toUpperCase();
+
+        if (isoCountryCode === 'US') {
+            const { subdivision } = await getEnglishLocationFromCoords(latitude, longitude);
+            if (subdivision) return subdivision;
+            if (r.region?.trim()) return normalizeLocationFolderName(r.region);
+        } else if (isoCountryCode) {
+            const englishCountry = getEnglishCountryFromIsoCode(isoCountryCode);
+            if (englishCountry) return englishCountry;
+
+            const { country } = await getEnglishLocationFromCoords(latitude, longitude);
+            if (country) return country;
+        }
+
         const country = r.country?.trim();
         const region = r.region?.trim();
         const isUS =
+            isoCountryCode === 'US' ||
             country === 'United States' ||
             country === 'United States of America' ||
             country === 'USA';

@@ -57,7 +57,7 @@ async function fetchFolderNameFromGoogleCoords(
     googleApiKey: string
 ): Promise<string | null> {
     const response = await fetch(
-        `https://maps.googleapis.com/maps/api/geocode/json?latlng=${latitude},${longitude}&key=${googleApiKey}`
+        `https://maps.googleapis.com/maps/api/geocode/json?latlng=${latitude},${longitude}&language=en&key=${googleApiKey}`
     );
     const data = await response.json();
     const components = data.results
@@ -77,7 +77,7 @@ export async function fetchGooglePlaceDetails(
     }
 
     const response = await fetch(
-        `https://maps.googleapis.com/maps/api/place/details/json?place_id=${encodeURIComponent(placeId)}&fields=geometry,photos,address_components&key=${googleApiKey}`
+        `https://maps.googleapis.com/maps/api/place/details/json?place_id=${encodeURIComponent(placeId)}&fields=geometry,photos,address_components&language=en&key=${googleApiKey}`
     );
     const data = await response.json();
     const components = data.result?.address_components as GoogleAddressComponent[] | undefined;

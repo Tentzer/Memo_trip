@@ -6,6 +6,7 @@
   "build": {
     "preview": {
       "environment": "preview",
+      "channel": "preview",
       "distribution": "internal",
       "android": {
         "buildType": "apk"
@@ -13,12 +14,20 @@
     },
     "production": {
       "environment": "production",
+      "channel": "production",
+      "ios": {
+        "distribution": "store"
+      },
       "android": {
         "buildType": "app-bundle"
       }
     }
   },
   "submit": {
-    "production": {}
+    "production": {
+      "ios": {
+        "ascAppId": "6769928552"
+      }
+    }
   }
 }

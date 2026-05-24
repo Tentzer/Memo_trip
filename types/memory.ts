@@ -1,3 +1,15 @@
+export type MemoryPlaceCategory =
+    | 'restaurant'
+    | 'pasta'
+    | 'ramen'
+    | 'sushi'
+    | 'cafe'
+    | 'bar'
+    | 'bakery'
+    | 'attraction'
+    | 'shopping'
+    | 'other';
+
 export interface Memory {
     id: string;
     uri: string;
@@ -10,8 +22,11 @@ export interface Memory {
     country?: string;
     title?: string;
     description?: string;
+    placeCategory?: MemoryPlaceCategory;
     customFolderIds: string[];
     excludeFromCountryFolder?: boolean;
+    source?: 'video_import';
+    sourceUrl?: string;
 }
 
 export interface CustomFolder {
@@ -24,4 +39,14 @@ export interface CustomFolder {
     coverImageUrl?: string | null;
 }
 
-export type MemoryMeta = Pick<Memory, 'country' | 'title' | 'description' | 'customFolderIds' | 'excludeFromCountryFolder'>;
+export type MemoryMeta = Pick<
+    Memory,
+    | 'country'
+    | 'title'
+    | 'description'
+    | 'placeCategory'
+    | 'customFolderIds'
+    | 'excludeFromCountryFolder'
+    | 'source'
+    | 'sourceUrl'
+>;

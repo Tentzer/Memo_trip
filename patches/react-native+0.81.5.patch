@@ -1,0 +1,19 @@
+diff --git a/node_modules/react-native/scripts/react-native-xcode.sh b/node_modules/react-native/scripts/react-native-xcode.sh
+index 1dcdf55..e117457 100755
+--- a/node_modules/react-native/scripts/react-native-xcode.sh
++++ b/node_modules/react-native/scripts/react-native-xcode.sh
+@@ -43,9 +43,13 @@ case "$CONFIGURATION" in
+       fi
+     else
+       echo "Bundling for physical device. Use the SKIP_BUNDLING flag to change this behavior."
++      # Embedded device bundles must not use __DEV__ — Expo devtools expects Metro.
++      DEV=false
+     fi
+ 
+-    DEV=true
++    if [[ "$PLATFORM_NAME" == *simulator ]]; then
++      DEV=true
++    fi
+     ;;
+   "")
+     echo "$0 must be invoked by Xcode"

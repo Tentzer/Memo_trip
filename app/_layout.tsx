@@ -2,7 +2,6 @@ import { AuthProvider, useAuth } from "@/context/AuthContext";
 import { ThemeProvider, useAppTheme } from "@/context/ThemeContext";
 import { AppSplash } from "@/components/AppSplash";
 import ShareIntentHandler from "@/components/ShareIntentHandler";
-import { ShareIntentProvider, useShareIntentContext } from "expo-share-intent";
 import { router, Stack, useSegments } from "expo-router";
 import { StatusBar } from 'expo-status-bar';
 import * as SystemUI from 'expo-system-ui';
@@ -15,41 +14,48 @@ import Animated, {
   withTiming,
 } from 'react-native-reanimated';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
-import { MemoryProvider } from '../context/MemoryContext';
+import ChooseUsernameModal from '@/components/ChooseUsernameModal';
+import { ShareIntentProvider } from "expo-share-intent";
+import { useRequireUsername } from '@/hooks/useRequireUsername';
+import { useEASUpdate } from '@/hooks/useEASUpdate';
 import { ImportQueueProvider } from '../context/ImportQueueContext';
+import { MemoryProvider } from '../context/MemoryContext';
 import './globals.css';
 
-// AuthProvider is lifted above RootLayoutContent so it can use useAuth()
+function ShareIntentRoot() {
+  const { user } = useAuth();
+
+  return (
+    <ShareIntentProvider
+      options={{
+        scheme: "memo-trip",
+        onResetShareIntent: () => {
+          router.replace(user ? '/onboarding/Home' : '/Login');
+        },
+      }}
+    >
+      <RootLayoutContent />
+    </ShareIntentProvider>
+  );
+}
+
 export default function RootLayout() {
   return (
     <ThemeProvider>
       <AuthProvider>
-        <ShareIntentProvider
-          options={{
-            scheme: "memo-trip",
-            // ShareIntentHandler owns navigation; avoid REPLACE on nested tabs here.
-            onResetShareIntent: () => {},
-          }}
-        >
-          <RootLayoutContent />
-        </ShareIntentProvider>
+        <ShareIntentRoot />
       </AuthProvider>
     </ThemeProvider>
   );
 }
 
-// Splash state machine:
-//   'splash'    → AppSplash animation is playing
-//   'covering'  → Animation done, opaque cover holds while navigation flies
-//   'fading'    → Route settled; cover fades out over ~400ms so the map can
-//                 finish rendering underneath before it's fully exposed
-//   'done'      → Cover fully gone, app fully visible
 type SplashState = 'splash' | 'covering' | 'fading' | 'done';
 
 function RootLayoutContent() {
+  useEASUpdate();
   const { isDarkMode, theme } = useAppTheme();
   const { user, loading } = useAuth();
-  const { hasShareIntent, isReady: shareIntentReady } = useShareIntentContext();
+  const { needsUsername, refresh: refreshUsername } = useRequireUsername();
   const segments = useSegments();
   const [splashState, setSplashState] = useState<SplashState>('splash');
   const [dataReady, setDataReady] = useState(false);
@@ -60,18 +66,25 @@ function RootLayoutContent() {
     void SystemUI.setBackgroundColorAsync(theme.colors.background);
   }, [theme.colors.background]);
 
-  // After splash: land on map unless opened via share sheet (ShareIntentHandler owns navigation).
   useEffect(() => {
     if (splashState !== 'covering') return;
     if (loading) return;
-    if (shareIntentReady && hasShareIntent) return;
-    router.navigate('/onboarding/Home');
-  }, [splashState, loading, shareIntentReady, hasShareIntent, segments]);
+    router.replace(user ? '/onboarding/Home' : '/Login');
+  }, [splashState, loading, user]);
 
-  // Once the route settles on onboarding, fade the cover out so Google Maps
-  // has time to finish rendering tiles underneath before it's fully exposed.
   useEffect(() => {
-    if (splashState === 'covering' && segments[0] === 'onboarding') {
+    if (loading) return;
+    const route = segments[0];
+    if (!user && (route === 'onboarding' || route === 'account')) {
+      router.replace('/Login');
+    }
+  }, [loading, user, segments]);
+
+  useEffect(() => {
+    const route = segments[0];
+    const readyRoute =
+      route === 'onboarding' || route === 'Login' || route === 'SignUp';
+    if (splashState === 'covering' && readyRoute) {
       setSplashState('fading');
       coverOpacity.value = withTiming(0, { duration: 400 }, (finished) => {
         if (finished) runOnJS(setSplashState)('done');
@@ -84,35 +97,43 @@ function RootLayoutContent() {
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
       <ImportQueueProvider>
-      <ShareIntentHandler appReady={appReadyForShare} />
-      <MemoryProvider ready={!!user && dataReady}>
-        <StatusBar style={isDarkMode ? 'light' : 'dark'} backgroundColor={theme.colors.background} />
-        <Stack screenOptions={{ headerShown: false }}>
-          {/* animation:'none' prevents the exit transition from showing the
-              login page while the cover is still being removed */}
-          <Stack.Screen name="index" options={{ animation: 'none' }} />
-          <Stack.Screen name="onboarding" />
-          <Stack.Screen name="account" />
-        </Stack>
+        <ShareIntentHandler appReady={appReadyForShare} />
+        <MemoryProvider ready={!!user && dataReady}>
+          <StatusBar style={isDarkMode ? 'light' : 'dark'} backgroundColor={theme.colors.background} />
+          <Stack screenOptions={{ headerShown: false }}>
+            <Stack.Screen name="index" options={{ animation: 'none', gestureEnabled: false }} />
+            <Stack.Screen name="shareintent" options={{ animation: 'none', gestureEnabled: false }} />
+            <Stack.Screen name="onboarding" options={{ gestureEnabled: false }} />
+            <Stack.Screen name="account" />
+          </Stack>
 
-        {splashState === 'splash' && (
-          <AppSplash
-            onDone={() => setSplashState('covering')}
-            onMeasured={() => setDataReady(true)}
-          />
-        )}
+          {splashState === 'splash' && (
+            <AppSplash
+              onDone={() => setSplashState('covering')}
+              onMeasured={() => setDataReady(true)}
+            />
+          )}
 
-        {(splashState === 'covering' || splashState === 'fading') && (
-          <Animated.View
-            pointerEvents="none"
-            style={[
-              StyleSheet.absoluteFill,
-              { backgroundColor: theme.colors.background, zIndex: 998 },
-              coverAnimatedStyle,
-            ]}
-          />
-        )}
-      </MemoryProvider>
+          {(splashState === 'covering' || splashState === 'fading') && (
+            <Animated.View
+              pointerEvents="none"
+              style={[
+                StyleSheet.absoluteFill,
+                { backgroundColor: theme.colors.background, zIndex: 998 },
+                coverAnimatedStyle,
+              ]}
+            />
+          )}
+
+          {needsUsername ? (
+            <ChooseUsernameModal
+              visible
+              onComplete={() => {
+                void refreshUsername();
+              }}
+            />
+          ) : null}
+        </MemoryProvider>
       </ImportQueueProvider>
     </GestureHandlerRootView>
   );

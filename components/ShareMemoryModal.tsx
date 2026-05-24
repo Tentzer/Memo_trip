@@ -1,29 +1,31 @@
 import { type Memory } from '@/context/MemoryContext';
+import { useAppTheme } from '@/context/ThemeContext';
 import React from 'react';
 import { Keyboard, Modal, Pressable, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 
 interface Props {
     visible: boolean;
     onClose: () => void;
-    shareEmail: string;
-    setShareEmail: (email: string) => void;
+    shareRecipient: string;
+    setShareRecipient: (value: string) => void;
     memoryToShare: Memory | null;
-    onSubmit: (email: string, memory: Memory | null) => Promise<void>;
+    onSubmit: (recipientInput: string, memory: Memory | null) => Promise<void>;
 }
 
 export default function ShareMemoryModal({
     visible,
     onClose,
-    shareEmail,
-    setShareEmail,
+    shareRecipient,
+    setShareRecipient,
     memoryToShare,
     onSubmit,
 }: Props) {
+    const { theme } = useAppTheme();
     const handleSubmit = async () => {
-        const emailToSend = shareEmail;
+        const recipientInput = shareRecipient;
         onClose();
-        setShareEmail('');
-        await onSubmit(emailToSend, memoryToShare);
+        setShareRecipient('');
+        await onSubmit(recipientInput, memoryToShare);
     };
 
     return (
@@ -39,16 +41,18 @@ export default function ShareMemoryModal({
                     onPress={Keyboard.dismiss}
                     accessible={false}
                 >
-                    <View className="bg-white p-6 rounded-2xl w-80">
-                        <Text className="text-lg font-bold">Share Memory</Text>
+                    <View className="p-6 rounded-2xl w-80" style={{ backgroundColor: theme.colors.surface }}>
+                        <Text className="text-lg font-bold" style={{ color: theme.colors.text }}>Share Memory</Text>
                         <TextInput
-                            className="h-12 border border-gray-200 rounded-xl px-4 text-slate-800 font-medium mt-4"
-                            placeholder="User's Email"
-                            placeholderTextColor="#94a3b8"
-                            value={shareEmail}
-                            onChangeText={setShareEmail}
+                            className="h-12 border rounded-xl px-4 font-medium mt-4"
+                            style={{ borderColor: theme.colors.border, color: theme.colors.text, backgroundColor: theme.colors.input }}
+                            placeholder="Friend's username"
+                            placeholderTextColor={theme.colors.placeholder}
+                            value={shareRecipient}
+                            onChangeText={setShareRecipient}
                             autoCapitalize="none"
-                            keyboardType="email-address"
+                            autoCorrect={false}
+                            keyboardType="default"
                             returnKeyType="send"
                         />
                         <TouchableOpacity
@@ -59,9 +63,10 @@ export default function ShareMemoryModal({
                         </TouchableOpacity>
                         <TouchableOpacity
                             onPress={onClose}
-                            className="mt-4 p-3 bg-gray-100 rounded-xl items-center"
+                            className="mt-4 p-3 rounded-xl items-center"
+                            style={{ backgroundColor: theme.colors.surfaceMuted }}
                         >
-                            <Text className="text-gray-600 font-semibold">Cancel</Text>
+                            <Text className="font-semibold" style={{ color: theme.colors.textSecondary }}>Cancel</Text>
                         </TouchableOpacity>
                     </View>
                 </Pressable>

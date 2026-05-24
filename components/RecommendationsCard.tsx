@@ -2,6 +2,7 @@ import { Ionicons } from '@expo/vector-icons';
 import React, { useState } from 'react';
 import { ActivityIndicator, Linking, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 
+import { useAppTheme } from '@/context/ThemeContext';
 import type { RecommendedPlace } from '@/types/plan';
 
 interface Props {
@@ -10,6 +11,8 @@ interface Props {
 }
 
 export default function RecommendationsCard({ places, onSaveToMemories }: Props) {
+    const { theme } = useAppTheme();
+    const styles = React.useMemo(() => createStyles(theme.colors), [theme.colors]);
     const [savingId, setSavingId] = useState<string | null>(null);
     const [savedIds, setSavedIds] = useState<Set<string>>(new Set());
 
@@ -104,12 +107,14 @@ export default function RecommendationsCard({ places, onSaveToMemories }: Props)
     );
 }
 
-const styles = StyleSheet.create({
+type ThemeColors = ReturnType<typeof useAppTheme>['theme']['colors'];
+
+const createStyles = (colors: ThemeColors) => StyleSheet.create({
     container: {
-        backgroundColor: '#FFFFFF',
+        backgroundColor: colors.surface,
         borderRadius: 14,
         borderWidth: 1,
-        borderColor: '#E2E8F0',
+        borderColor: colors.border,
         marginTop: 8,
         marginHorizontal: 16,
     },
@@ -120,7 +125,7 @@ const styles = StyleSheet.create({
     },
     rowBorder: {
         borderBottomWidth: 1,
-        borderBottomColor: '#F1F5F9',
+        borderBottomColor: colors.border,
     },
     badgeColumn: {
         width: 28,
@@ -130,7 +135,7 @@ const styles = StyleSheet.create({
         width: 22,
         height: 22,
         borderRadius: 11,
-        backgroundColor: '#EFF6FF',
+        backgroundColor: colors.accentSoft,
         alignItems: 'center',
         justifyContent: 'center',
     },
@@ -150,14 +155,14 @@ const styles = StyleSheet.create({
     placeName: {
         fontSize: 14,
         fontWeight: '700',
-        color: '#1E293B',
+        color: colors.text,
         flex: 1,
         marginRight: 8,
     },
     ratingPill: {
         flexDirection: 'row',
         alignItems: 'center',
-        backgroundColor: '#FFFBEB',
+        backgroundColor: colors.warningSoft,
         borderRadius: 10,
         paddingHorizontal: 7,
         paddingVertical: 3,
@@ -170,7 +175,7 @@ const styles = StyleSheet.create({
     },
     description: {
         fontSize: 13,
-        color: '#64748B',
+        color: colors.textSecondary,
         lineHeight: 19,
         marginBottom: 10,
     },
@@ -200,7 +205,7 @@ const styles = StyleSheet.create({
         minHeight: 30,
         borderWidth: 1,
         borderColor: '#4285F4',
-        backgroundColor: '#FFFFFF',
+        backgroundColor: colors.surface,
     },
     buttonText: {
         fontSize: 12,

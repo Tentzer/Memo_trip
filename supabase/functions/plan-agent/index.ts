@@ -1,7 +1,7 @@
 const GEMINI_API_KEY = Deno.env.get('GEMINI_API_KEY') ?? '';
 const GOOGLE_API_KEY = Deno.env.get('GOOGLE_MAPS_API_KEY') ?? '';
 
-const GEMINI_MODEL = 'gemini-2.5-flash';
+const GEMINI_MODEL = Deno.env.get('GEMINI_MODEL') ?? 'gemini-2.5-flash-lite';
 const GEMINI_BASE_URL = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`;
 
 const CORS_HEADERS = {
@@ -9,7 +9,9 @@ const CORS_HEADERS = {
     'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
-const CORE_RULES = `You are a trip planning engine for a mobile app. Prioritize correct, actionable outputs: structured data for maps, minimal prose, no small talk unless the user is clearly chatting.
+const CORE_RULES = `You are a trip planning engine for a mobile app. Prioritize correct, actionable outputs: structured data for maps, minimal prose, no small talk unless the user is clearly chatting about travel.
+
+SCOPE: You only assist with travel, trip planning, and place recommendations (restaurants, attractions, shopping, accommodation, transportation, itineraries, destinations, local tips, etc.). If the user asks about anything unrelated to travel or places, politely explain that you are a travel planning assistant and can only help with travel-related questions. Do not answer off-topic questions.
 
 LANGUAGE: Detect the user's language from the latest user message and prior turns when provided. All user-facing text must be in that language. Google Maps search strings (maps_query_english, searchQuery, structured English query fields) stay in English.
 
@@ -24,6 +26,11 @@ CONTEXT: Use prior conversation turns. Pronouns ("these", "those", "there", "the
 SAFETY: No medical or legal advice. Do not guarantee opening hours; suggest verifying before visiting when relevant.`;
 
 const JSON_ONLY = 'Return a single JSON object only. No markdown.';
+
+import type { RecommendedPlace } from './plan_agent_types.ts';
+import { readNearMeGeoEnv } from './geo.ts';
+import { createUserSupabase, fetchMemorySnippetBlockForPlaces } from './memory_rag.ts';
+import { searchNearbyPlaces, searchPlaceAutocomplete as searchPlace } from './places_search.ts';
 
 // ---- Types ----
 
@@ -123,19 +130,6 @@ interface PlanStop {
     openingHours: string | null;
     country: string;
     warnings: string[];
-}
-
-interface RecommendedPlace {
-    name: string;
-    address: string;
-    rating: number;
-    userRatingsTotal: number;
-    placeId: string;
-    photoReference: string | null;
-    lat: number;
-    lng: number;
-    country: string;
-    description: string;
 }
 
 // ---- Helpers ----
@@ -272,75 +266,6 @@ async function getCityName(lat: number, lng: number): Promise<string> {
     }
 }
 
-async function searchNearbyPlaces(
-    query: string,
-    lat: number,
-    lng: number,
-    radiusMeters = 3000,
-    excludePlaceIds?: Set<string>,
-): Promise<RecommendedPlace[]> {
-    const params = new URLSearchParams({
-        query: `${query}`,
-        location: `${lat},${lng}`,
-        radius: String(radiusMeters),
-        key: GOOGLE_API_KEY,
-    });
-    const res = await fetch(
-        `https://maps.googleapis.com/maps/api/place/textsearch/json?${params}`,
-    );
-    const data = await res.json();
-    const results: Record<string, unknown>[] = (data.results ?? []).slice(0, 20);
-
-    const mapped = results
-        .map((r) => ({
-            name: r.name as string,
-            address: (r.formatted_address ?? r.vicinity ?? '') as string,
-            rating: (r.rating ?? 0) as number,
-            userRatingsTotal: (r.user_ratings_total ?? 0) as number,
-            placeId: r.place_id as string,
-            photoReference:
-                ((r.photos as Record<string, unknown>[])?.[0]?.photo_reference as string) ?? null,
-            lat: ((r.geometry as Record<string, unknown>)?.location as Record<string, number>)
-                ?.lat ?? 0,
-            lng: ((r.geometry as Record<string, unknown>)?.location as Record<string, number>)
-                ?.lng ?? 0,
-            country: '',
-            description: '',
-        }))
-        .filter((p) => p.name && p.placeId);
-
-    const rated = mapped.filter((p) => p.rating >= 3.5);
-    let pool = rated.length ? rated : mapped;
-    if (excludePlaceIds?.size) {
-        const filtered = pool.filter((p) => !excludePlaceIds.has(p.placeId));
-        if (filtered.length > 0) pool = filtered;
-    }
-    return pool.sort((a, b) => b.rating - a.rating).slice(0, 5);
-}
-
-async function searchPlace(
-    query: string,
-    userLat: number,
-    userLng: number,
-): Promise<{ placeId: string; name: string } | null> {
-    const params = new URLSearchParams({
-        input: query,
-        location: `${userLat},${userLng}`,
-        radius: '50000',
-        key: GOOGLE_API_KEY,
-    });
-    const res = await fetch(
-        `https://maps.googleapis.com/maps/api/place/autocomplete/json?${params}`,
-    );
-    const data = await res.json();
-    if (!data.predictions?.length) return null;
-    const first = data.predictions[0];
-    return {
-        placeId: first.place_id,
-        name: first.structured_formatting?.main_text ?? first.description,
-    };
-}
-
 async function getPlaceDetails(placeId: string): Promise<{
     lat: number;
     lng: number;
@@ -386,16 +311,21 @@ async function enrichPlacesWithGemini(
     userMessage: string,
     sectionHint: string,
     priorHistory?: PlanAgentHistoryItem[],
+    ownedMemorySnippetBlock?: string,
 ): Promise<{ intro: string; places: RecommendedPlace[] }> {
     if (!places.length) return { intro: '', places: [] };
     const placesList = places
         .map((p, i) => `${i + 1}. ${p.name} — ${p.rating}/5 (${p.userRatingsTotal} reviews) — ${p.address}`)
         .join('\n');
+    const memoryAppend = ownedMemorySnippetBlock?.trim()
+        ? `\n\n${ownedMemorySnippetBlock.trim()}`
+        : '';
+
     const descSystem = `${CORE_RULES}
 
 ${JSON_ONLY}
 
-Section context: ${sectionHint}
+Section context: ${sectionHint}${memoryAppend}
 
 Tasks:
 1. ONE short intro sentence for this list (user's language).
@@ -530,6 +460,9 @@ Deno.serve(async (req) => {
             });
         }
 
+        const geoConfig = readNearMeGeoEnv();
+        const userSb = createUserSupabase(req);
+
         // Get city name for context
         const cityName = await getCityName(userLocation.latitude, userLocation.longitude);
         console.log('User city:', cityName);
@@ -543,15 +476,17 @@ Device location area (for "near me"): ${cityName}. Earlier turns may appear as c
 
 Classify the LATEST user message:
 
-1. "chat" — greeting, general question, or not about places or trip planning. Set chatResponse (user's language, brief).
+1. "chat" — travel-related greeting, travel question, or clarification about a trip/place. Set chatResponse (user's language, brief).
 
-2. "recommend" — find one category of places (food type, shopping, museum, etc.). Set searchQuery: concise English for Google Text Search.
+2. "recommend" — find one category of places (food type, shopping, museum, etc.). Set searchQuery: concise English keywords for Google Places Nearby / Text Search.
 
 3. "plan" — only an ordered multi-stop day, no multi-part "give me options for breakfast AND shopping" lists.
 
 4. "plan_with_recommendations" — lists of options for several vague parts of the day plus an ordered plan (e.g. breakfast ideas + shopping ideas + plan).
 
 5. "exclude_prior_place_results": true if the user wants different venues than already shown (e.g. "other", "not these", "somewhere else", "more but different", "another place"). false otherwise.
+
+IMPORTANT: If the message is NOT related to travel, trips, destinations, places, or any travel topic, classify as "chat" and set chatResponse to a polite message (in the user's language) explaining that you are a travel planning assistant and can only help with travel-related questions such as planning trips, finding places to visit, restaurants, activities, or destinations.
 
 Return JSON:
 {
@@ -574,7 +509,7 @@ Return JSON:
             const text =
                 direct ||
                 (await callGemini(
-                    `${CORE_RULES}\n\nReply briefly in the user's language. No emojis.`,
+                    `${CORE_RULES}\n\nReply briefly in the user's language. Only answer if the question is travel-related. If not, politely explain you are a travel planning assistant. No emojis.`,
                     message,
                     false,
                     history,
@@ -591,7 +526,7 @@ Return JSON:
                 query,
                 userLocation.latitude,
                 userLocation.longitude,
-                3000,
+                geoConfig.textSearchBiasRadiusMeters,
                 excludedPlaceIds,
             );
 
@@ -605,16 +540,21 @@ Return JSON:
                 return jsonResponse({ type: 'chat', text: noResultsMsg });
             }
 
+            const ownedSnippet =
+                userSb !== null ? await fetchMemorySnippetBlockForPlaces(userSb, places) : '';
+
             // Generate intro + per-place descriptions in one Gemini call
             const placesList = places
                 .map((p, i) => `${i + 1}. ${p.name} — ${p.rating}/5 (${p.userRatingsTotal} reviews) — ${p.address}`)
                 .join('\n');
 
+            const memoryAppend = ownedSnippet.trim() !== '' ? `\n\n${ownedSnippet}` : '';
+
             const descSystem = `${CORE_RULES}
 
 ${JSON_ONLY}
 
-Area: ${cityName}.
+Area: ${cityName}.${memoryAppend}
 
 Tasks:
 1. ONE intro sentence for these results (user's language).
@@ -696,11 +636,15 @@ Return JSON:
                         destRadius,
                         excludePrior ? excludedPlaceIds : undefined,
                     );
+                    const ownedSnippet = userSb
+                        ? await fetchMemorySnippetBlockForPlaces(userSb, rawPlaces)
+                        : '';
                     const { intro, places: withDesc } = await enrichPlacesWithGemini(
                         rawPlaces,
                         message,
                         `${seg.user_language_label}: ${seg.maps_query_english}`,
                         history,
+                        ownedSnippet,
                     );
                     sections.push({ title: seg.user_language_label, intro, places: withDesc });
                     const pick = withDesc[0];
@@ -739,11 +683,15 @@ Return JSON:
                             description: '',
                         };
                         const label = seg.user_language_label ?? found.name;
+                        const ownedSnippet = userSb
+                            ? await fetchMemorySnippetBlockForPlaces(userSb, [single])
+                            : '';
                         const { intro, places: withDesc } = await enrichPlacesWithGemini(
                             [single],
                             message,
                             `${label}: ${seg.maps_query_english}`,
                             history,
+                            ownedSnippet,
                         );
                         sections.push({ title: label, intro, places: withDesc });
                         resolvedRoute.push({
