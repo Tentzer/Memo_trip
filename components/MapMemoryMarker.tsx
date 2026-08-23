@@ -1,7 +1,13 @@
+import { getSourcePlatform } from '@/lib/sourcePlatform';
 import type { Memory } from '@/types/memory';
+import { LinearGradient } from 'expo-linear-gradient';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Image, StyleSheet, View } from 'react-native';
 import { Marker } from 'react-native-maps';
+
+const INSTAGRAM_GRADIENT = ['#f9ce34', '#ee2a7b', '#6228d7'] as const;
+const TIKTOK_GRADIENT = ['#25f4ee', '#010101', '#fe2c55'] as const;
+const FACEBOOK_BLUE = '#1877f2';
 
 type MapMemoryMarkerProps = {
     memory: Memory;
@@ -33,7 +39,23 @@ export default function MapMemoryMarker({
     const [tracksViewChanges, setTracksViewChanges] = useState(true);
     const imageSettledRef = useRef(false);
     const isFirstRenderRef = useRef(true);
-    const accentColor = variant === 'owned' ? '#1d4ed8' : '#2563eb';
+
+    const sourcePlatform =
+        memory.source === 'video_import' ? getSourcePlatform(memory.sourceUrl) : null;
+    const ringGradient =
+        sourcePlatform === 'instagram'
+            ? INSTAGRAM_GRADIENT
+            : sourcePlatform === 'tiktok'
+                ? TIKTOK_GRADIENT
+                : null;
+    const accentColor =
+        sourcePlatform === 'instagram'
+            ? '#ee2a7b'
+            : sourcePlatform === 'tiktok'
+                ? '#fe2c55'
+                : sourcePlatform === 'facebook'
+                    ? FACEBOOK_BLUE
+                    : variant === 'owned' ? '#1d4ed8' : '#2563eb';
 
     const settleAfterFrames = useCallback(() => {
         requestAnimationFrame(() => {
@@ -97,16 +119,34 @@ export default function MapMemoryMarker({
                         },
                     ]}
                 >
-                    <View style={[styles.markerAccentRing, { borderColor: accentColor }]} collapsable={false}>
-                        <Image
-                            key={memory.uri}
-                            source={{ uri: memory.uri }}
-                            style={styles.markerAvatarImage}
-                            resizeMode="cover"
-                            onLoadEnd={handleImageSettled}
-                            onError={handleImageSettled}
-                        />
-                    </View>
+                    {ringGradient ? (
+                        <LinearGradient
+                            colors={ringGradient}
+                            start={{ x: 0, y: 1 }}
+                            end={{ x: 1, y: 0 }}
+                            style={styles.markerGradientRing}
+                        >
+                            <Image
+                                key={memory.uri}
+                                source={{ uri: memory.uri }}
+                                style={styles.markerGradientAvatarImage}
+                                resizeMode="cover"
+                                onLoadEnd={handleImageSettled}
+                                onError={handleImageSettled}
+                            />
+                        </LinearGradient>
+                    ) : (
+                        <View style={[styles.markerAccentRing, { borderColor: accentColor }]} collapsable={false}>
+                            <Image
+                                key={memory.uri}
+                                source={{ uri: memory.uri }}
+                                style={styles.markerAvatarImage}
+                                resizeMode="cover"
+                                onLoadEnd={handleImageSettled}
+                                onError={handleImageSettled}
+                            />
+                        </View>
+                    )}
                 </View>
                 <View style={[styles.markerStem, { backgroundColor: accentColor }]} />
             </View>
@@ -140,6 +180,19 @@ const styles = StyleSheet.create({
         borderRadius: 29,
         borderWidth: 2,
         overflow: 'hidden',
+    },
+    markerGradientRing: {
+        width: 58,
+        height: 58,
+        borderRadius: 29,
+        overflow: 'hidden',
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    markerGradientAvatarImage: {
+        width: 51,
+        height: 51,
+        borderRadius: 25.5,
     },
     markerAvatarImage: {
         width: 54,

@@ -4,6 +4,7 @@ import {
     getCachedFormattedAddressFromCoords,
     getFormattedAddressFromCoords,
 } from '@/lib/geocoding';
+import { getSourcePlatform } from '@/lib/sourcePlatform';
 import { Ionicons } from '@expo/vector-icons';
 import { Image as ExpoImage } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -97,15 +98,7 @@ export default function MemoInfoModal({ visible, memory, readOnly = false, onClo
         }
     }, [memory]);
 
-    const sourcePlatform = memory?.sourceUrl
-        ? memory.sourceUrl.includes('instagram.com')
-            ? 'instagram'
-            : memory.sourceUrl.includes('tiktok.com')
-            ? 'tiktok'
-            : memory.sourceUrl.includes('facebook.com') || memory.sourceUrl.includes('fb.watch')
-            ? 'facebook'
-            : null
-        : null;
+    const sourcePlatform = getSourcePlatform(memory?.sourceUrl);
 
     const handleOpenGoogleMaps = useCallback(async () => {
         if (!memory) return;
