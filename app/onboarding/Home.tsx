@@ -106,7 +106,6 @@ export default function MapScreen() {
     // coordinates. We gate marker rendering on this flag so every marker goes
     // through the same correct path the hide/show toggle hits.
     const [isMapReady, setIsMapReady] = useState(false);
-    const [markerRenderVersion, setMarkerRenderVersion] = useState(0);
     // Tracks the last folder-filter params we applied so re-renders don't
     // re-apply a filter the user has already manually cleared.
     const processedFolderFilterRef = useRef<string | null>(null);
@@ -171,15 +170,11 @@ export default function MapScreen() {
         setActiveMapLibraryFilter(null);
         setSelectedFilterLibraryIds([]);
         setIsLibraryFilterVisible(false);
-        setMarkerRenderVersion((prev) => prev + 1);
     }, []);
 
     const handleShowMemoriesChange = useCallback((next: boolean) => {
         setShowMemories(next);
-        if (next && isMapReady) {
-            setMarkerRenderVersion((prev) => prev + 1);
-        }
-    }, [isMapReady, setShowMemories]);
+    }, [setShowMemories]);
 
     const handleShowFolderOnMap = useCallback((folderId: string, folderType: 'country' | 'custom', folderName: string) => {
         setActiveMapLibraryFilter({ id: folderId, mode: folderType, name: folderName });
@@ -188,7 +183,6 @@ export default function MapScreen() {
         setShowMemories(true);
         setIsGalleryVisible(false);
         setIsCountryLibraryVisible(false);
-        setMarkerRenderVersion((prev) => prev + 1);
     }, [setShowMemories, setIsGalleryVisible, setIsCountryLibraryVisible]);
 
     const handleOpenInfoFromActions = useCallback(() => {
@@ -634,7 +628,7 @@ export default function MapScreen() {
 
                     {mapMarkersToRender.map(({ memory, variant }) => (
                         <MapMemoryMarker
-                            key={`${variant}-${markerRenderVersion}-${memory.id}`}
+                            key={`${variant}-${memory.id}`}
                             memory={memory}
                             variant={variant}
                             sharedSurfaceColor={theme.colors.surface}
