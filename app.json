@@ -2,7 +2,7 @@
   "expo": {
     "name": "Memo Trip",
     "slug": "memo_trip",
-    "version": "1.0.0",
+    "version": "1.0.1",
     "orientation": "default",
     "scheme": "memo-trip",
     "userInterfaceStyle": "automatic",
@@ -13,7 +13,11 @@
       "backgroundColor": "#ffffff"
     },
     "ios": {
-      "bundleIdentifier": "com.tentzer.memotrip"
+      "bundleIdentifier": "com.tentzer.memotrip",
+      "buildNumber": "15",
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false
+      }
     },
     "android": {
       "package": "com.tentzer.memotrip",
