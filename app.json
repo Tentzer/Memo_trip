@@ -2,7 +2,7 @@
   "expo": {
     "name": "Memo Trip",
     "slug": "memo_trip",
-    "version": "1.0.0",
+    "version": "1.0.1",
     "orientation": "default",
     "scheme": "memo-trip",
     "userInterfaceStyle": "automatic",
@@ -13,10 +13,28 @@
       "backgroundColor": "#ffffff"
     },
     "ios": {
-      "bundleIdentifier": "com.tentzer.memotrip"
+      "bundleIdentifier": "com.tentzer.memotrip",
+      "buildNumber": "11",
+      "infoPlist": {
+        "LSApplicationQueriesSchemes": [
+          "waze",
+          "comgooglemaps",
+          "googlemaps",
+          "maps",
+          "waze",
+          "comgooglemaps",
+          "googlemaps",
+          "maps"
+        ],
+        "ITSAppUsesNonExemptEncryption": false
+      },
+      "config": {
+        "googleMapsApiKey": ""
+      }
     },
     "android": {
       "package": "com.tentzer.memotrip",
+      "versionCode": 1,
       "adaptiveIcon": {
         "foregroundImage": "./assets/screenshots/MemoTrip_Logo.png",
         "backgroundColor": "#ffffff"

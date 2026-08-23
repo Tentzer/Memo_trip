@@ -1,3 +1,4 @@
+import { resolveRecipientProfile } from '@/lib/resolveRecipientProfile';
 import { supabase } from '@/lib/supabase';
 import { InviteActionResult, PendingInvite, PendingLibraryInvite, PendingMemoInvite } from '@/types/invites';
 import { CustomFolder, Memory } from '@/types/memory';
@@ -137,9 +138,10 @@ export function useSharing({ user, customFoldersRef, getLibraryMemories, reloadM
         setInvitesLoading(false);
     }, [user?.email]);
 
-    const handleShareSubmit = useCallback(async (user_email: string, selectedMemory: Memory | null): Promise<void> => {
-        if (!user_email) {
-            Alert.alert('Please enter a valid email address');
+    const handleShareSubmit = useCallback(async (recipientInput: string, selectedMemory: Memory | null): Promise<void> => {
+        const trimmed = recipientInput.trim();
+        if (!trimmed) {
+            Alert.alert('Username required', 'Enter your friend Memo Trip username (or their email).');
             return;
         }
         if (!selectedMemory) {
@@ -147,22 +149,27 @@ export function useSharing({ user, customFoldersRef, getLibraryMemories, reloadM
             return;
         }
 
-        const { data: receiver } = await supabase
-            .from('profiles')
-            .select('id, email')
-            .eq('email', user_email)
-            .maybeSingle();
+        const receiver = await resolveRecipientProfile(trimmed);
 
         if (!receiver) {
-            Alert.alert('User does not exist in Memo Trip!');
+            Alert.alert(
+                'User not found',
+                trimmed.includes('@')
+                    ? 'No Memo Trip account uses that email.'
+                    : 'No Memo Trip user has that username.',
+            );
             return;
         }
 
         const { data: { user: currentUser } } = await supabase.auth.getUser();
+        if (receiver.id === currentUser?.id) {
+            Alert.alert('Invalid recipient', 'Choose someone else to share with.');
+            return;
+        }
 
         const { error } = await supabase.from('pending_shares').insert([{
             sender_id: currentUser?.id,
-            receiver_email: user_email,
+            receiver_email: receiver.email,
             memory_id: selectedMemory.id,
             image_uri: selectedMemory.uri,
             latitude: selectedMemory.latitude,
@@ -178,9 +185,10 @@ export function useSharing({ user, customFoldersRef, getLibraryMemories, reloadM
         }
     }, []);
 
-    const shareCustomFolder = useCallback(async (user_email: string, folderId: string): Promise<void> => {
-        if (!user_email) {
-            Alert.alert('Please enter a valid email address');
+    const shareCustomFolder = useCallback(async (recipientInput: string, folderId: string): Promise<void> => {
+        const trimmedRecipient = recipientInput.trim();
+        if (!trimmedRecipient) {
+            Alert.alert('Username required', 'Enter your friend Memo Trip username (or their email).');
             return;
         }
         if (!user?.id) {
@@ -198,14 +206,15 @@ export function useSharing({ user, customFoldersRef, getLibraryMemories, reloadM
             return;
         }
 
-        const { data: receiver } = await supabase
-            .from('profiles')
-            .select('id, email')
-            .eq('email', user_email)
-            .maybeSingle();
+        const receiver = await resolveRecipientProfile(trimmedRecipient);
 
         if (!receiver) {
-            Alert.alert('User does not exist in Memo Trip!');
+            Alert.alert(
+                'User not found',
+                trimmedRecipient.includes('@')
+                    ? 'No Memo Trip account uses that email.'
+                    : 'No Memo Trip user has that username.',
+            );
             return;
         }
         if (receiver.id === user.id) {
@@ -229,7 +238,7 @@ export function useSharing({ user, customFoldersRef, getLibraryMemories, reloadM
             .from('library_invites')
             .select('id')
             .eq('library_id', folderId)
-            .eq('receiver_email', user_email)
+            .eq('receiver_email', receiver.email)
             .eq('status', 'pending')
             .maybeSingle();
 
@@ -249,7 +258,7 @@ export function useSharing({ user, customFoldersRef, getLibraryMemories, reloadM
             .insert([{
                 library_id: folderId,
                 sender_id: user.id,
-                receiver_email: user_email,
+                receiver_email: receiver.email,
                 status: 'pending',
                 created_at: new Date().toISOString(),
             }])
@@ -263,7 +272,7 @@ export function useSharing({ user, customFoldersRef, getLibraryMemories, reloadM
 
         const snapshotRows = sourceLibraryMemories.map(m => ({
             sender_id: user.id,
-            receiver_email: user_email,
+            receiver_email: receiver.email,
             memory_id: m.id,
             image_uri: m.uri,
             latitude: m.latitude,
@@ -282,10 +291,10 @@ export function useSharing({ user, customFoldersRef, getLibraryMemories, reloadM
         Alert.alert('Success', 'Library invitation sent.');
     }, [user, customFoldersRef, getLibraryMemories]);
 
-    const grantLibraryEditAccess = useCallback(async (user_email: string, folderId: string): Promise<void> => {
-        const trimmed = user_email.trim();
+    const grantLibraryEditAccess = useCallback(async (recipientInput: string, folderId: string): Promise<void> => {
+        const trimmed = recipientInput.trim();
         if (!trimmed) {
-            Alert.alert('Email required', 'Enter an email address.');
+            Alert.alert('Username required', 'Enter their Memo Trip username (or email).');
             return;
         }
         if (!user?.id) {
@@ -303,14 +312,15 @@ export function useSharing({ user, customFoldersRef, getLibraryMemories, reloadM
             return;
         }
 
-        const { data: receiver } = await supabase
-            .from('profiles')
-            .select('id, email')
-            .eq('email', trimmed)
-            .maybeSingle();
+        const receiver = await resolveRecipientProfile(trimmed);
 
         if (!receiver) {
-            Alert.alert('User not found', 'No Memo Trip account uses that email.');
+            Alert.alert(
+                'User not found',
+                trimmed.includes('@')
+                    ? 'No Memo Trip account uses that email.'
+                    : 'No Memo Trip user has that username.',
+            );
             return;
         }
         if (receiver.id === user.id) {
@@ -362,28 +372,30 @@ export function useSharing({ user, customFoldersRef, getLibraryMemories, reloadM
             return { success: false, message: 'You need to be logged in to accept invites.' };
         }
 
-        const { data: invite, error: fetchError } = await supabase
-            .from('pending_shares')
-            .select('id, image_uri, latitude, longitude')
-            .eq('id', inviteId)
-            .maybeSingle();
+        const { data, error } = await supabase.rpc('accept_pending_memo_share', {
+            p_invite_id: inviteId,
+        });
 
-        if (fetchError || !invite) {
-            return { success: false, message: fetchError?.message || 'Invite not found.' };
+        if (error) {
+            return { success: false, message: error.message };
         }
 
-        const { error: insertError } = await supabase.from('memories').insert([{
-            user_id: user.id,
-            image_url: invite.image_uri,
-            latitude: invite.latitude,
-            longitude: invite.longitude,
-        }]);
-
-        if (insertError) {
-            return { success: false, message: insertError.message };
+        const payload = data as { ok?: boolean; error?: string } | null;
+        if (!payload?.ok) {
+            const code = payload?.error ?? 'accept_failed';
+            const friendly: Record<string, string> = {
+                profile_missing: 'Could not load your profile.',
+                invite_not_found: 'This invite is no longer valid.',
+                invite_not_pending: 'This invite is no longer pending.',
+                not_recipient: 'This invite was sent to a different account.',
+                source_memo_missing: 'The shared memo no longer exists.',
+                invite_sender_mismatch: 'This invite could not be verified.',
+                source_memo_archived: 'The shared memo is no longer available.',
+                accept_failed: 'Could not accept the invite.',
+            };
+            return { success: false, message: friendly[code] ?? code };
         }
 
-        await supabase.from('pending_shares').delete().eq('id', inviteId);
         await reloadMemories();
         await refreshPendingInvites();
         return { success: true };

@@ -12,6 +12,8 @@ export interface Memory {
     description?: string;
     customFolderIds: string[];
     excludeFromCountryFolder?: boolean;
+    source?: 'video_import';
+    sourceUrl?: string;
 }
 
 export interface CustomFolder {
@@ -24,4 +26,4 @@ export interface CustomFolder {
     coverImageUrl?: string | null;
 }
 
-export type MemoryMeta = Pick<Memory, 'country' | 'title' | 'description' | 'customFolderIds' | 'excludeFromCountryFolder'>;
+export type MemoryMeta = Pick<Memory, 'country' | 'title' | 'description' | 'customFolderIds' | 'excludeFromCountryFolder' | 'source' | 'sourceUrl'>;

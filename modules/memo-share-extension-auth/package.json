@@ -1,0 +1,9 @@
+{
+  "name": "memo-share-extension-auth",
+  "version": "1.0.0",
+  "main": "index.ts",
+  "peerDependencies": {
+    "expo": "*",
+    "expo-modules-core": "*"
+  }
+}

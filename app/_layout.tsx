@@ -15,11 +15,10 @@ import Animated, {
   withTiming,
 } from 'react-native-reanimated';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
-import { MemoryProvider } from '../context/MemoryContext';
 import { ImportQueueProvider } from '../context/ImportQueueContext';
+import { MemoryProvider } from '../context/MemoryContext';
 import './globals.css';
 
-// AuthProvider is lifted above RootLayoutContent so it can use useAuth()
 export default function RootLayout() {
   return (
     <ThemeProvider>
@@ -27,7 +26,6 @@ export default function RootLayout() {
         <ShareIntentProvider
           options={{
             scheme: "memo-trip",
-            // ShareIntentHandler owns navigation; avoid REPLACE on nested tabs here.
             onResetShareIntent: () => {},
           }}
         >
@@ -38,12 +36,6 @@ export default function RootLayout() {
   );
 }
 
-// Splash state machine:
-//   'splash'    → AppSplash animation is playing
-//   'covering'  → Animation done, opaque cover holds while navigation flies
-//   'fading'    → Route settled; cover fades out over ~400ms so the map can
-//                 finish rendering underneath before it's fully exposed
-//   'done'      → Cover fully gone, app fully visible
 type SplashState = 'splash' | 'covering' | 'fading' | 'done';
 
 function RootLayoutContent() {
@@ -60,7 +52,6 @@ function RootLayoutContent() {
     void SystemUI.setBackgroundColorAsync(theme.colors.background);
   }, [theme.colors.background]);
 
-  // After splash: land on map unless opened via share sheet (ShareIntentHandler owns navigation).
   useEffect(() => {
     if (splashState !== 'covering') return;
     if (loading) return;
@@ -68,8 +59,6 @@ function RootLayoutContent() {
     router.navigate('/onboarding/Home');
   }, [splashState, loading, shareIntentReady, hasShareIntent, segments]);
 
-  // Once the route settles on onboarding, fade the cover out so Google Maps
-  // has time to finish rendering tiles underneath before it's fully exposed.
   useEffect(() => {
     if (splashState === 'covering' && segments[0] === 'onboarding') {
       setSplashState('fading');
@@ -84,35 +73,33 @@ function RootLayoutContent() {
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
       <ImportQueueProvider>
-      <ShareIntentHandler appReady={appReadyForShare} />
-      <MemoryProvider ready={!!user && dataReady}>
-        <StatusBar style={isDarkMode ? 'light' : 'dark'} backgroundColor={theme.colors.background} />
-        <Stack screenOptions={{ headerShown: false }}>
-          {/* animation:'none' prevents the exit transition from showing the
-              login page while the cover is still being removed */}
-          <Stack.Screen name="index" options={{ animation: 'none' }} />
-          <Stack.Screen name="onboarding" />
-          <Stack.Screen name="account" />
-        </Stack>
+        <ShareIntentHandler appReady={appReadyForShare} />
+        <MemoryProvider ready={!!user && dataReady}>
+          <StatusBar style={isDarkMode ? 'light' : 'dark'} backgroundColor={theme.colors.background} />
+          <Stack screenOptions={{ headerShown: false }}>
+            <Stack.Screen name="index" options={{ animation: 'none' }} />
+            <Stack.Screen name="onboarding" />
+            <Stack.Screen name="account" />
+          </Stack>
 
-        {splashState === 'splash' && (
-          <AppSplash
-            onDone={() => setSplashState('covering')}
-            onMeasured={() => setDataReady(true)}
-          />
-        )}
+          {splashState === 'splash' && (
+            <AppSplash
+              onDone={() => setSplashState('covering')}
+              onMeasured={() => setDataReady(true)}
+            />
+          )}
 
-        {(splashState === 'covering' || splashState === 'fading') && (
-          <Animated.View
-            pointerEvents="none"
-            style={[
-              StyleSheet.absoluteFill,
-              { backgroundColor: theme.colors.background, zIndex: 998 },
-              coverAnimatedStyle,
-            ]}
-          />
-        )}
-      </MemoryProvider>
+          {(splashState === 'covering' || splashState === 'fading') && (
+            <Animated.View
+              pointerEvents="none"
+              style={[
+                StyleSheet.absoluteFill,
+                { backgroundColor: theme.colors.background, zIndex: 998 },
+                coverAnimatedStyle,
+              ]}
+            />
+          )}
+        </MemoryProvider>
       </ImportQueueProvider>
     </GestureHandlerRootView>
   );

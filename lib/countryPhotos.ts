@@ -59,6 +59,7 @@ const countryPhotoRegistry: Record<string, ImageSourcePropType> = {
     'japan': require('../assets/country-photos/Japan.jpg'),
     'california': require('../assets/country-photos/California.jpg'),
     'virginia': require('../assets/country-photos/Virginia.jpg'),
+    'florida': require('../assets/country-photos/Florida.jpg'),
 };
 
 const normalizeCountryKey = (countryName: string) =>

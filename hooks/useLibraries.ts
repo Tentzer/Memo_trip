@@ -3,6 +3,7 @@ import { Alert } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
 import { User } from '@supabase/supabase-js';
 import { uploadLibraryCover } from '@/lib/memoryApi';
+import { revokeMarketLibraryDownload } from '@/lib/marketplaceApi';
 import { supabase } from '@/lib/supabase';
 import { Memory, CustomFolder } from '@/types/memory';
 import { loadMemoryMeta, saveMemoryMeta } from '@/lib/memoryStorage';
@@ -105,6 +106,15 @@ export function useLibraries({
             return { success: false, message: 'Library not found.' };
         }
 
+        /** Marketplace downloads live only in their library (excludeFromCountryFolder). */
+        const orphanMarketplaceMemoIds = memoriesRef.current
+            .filter(m => !m.deletedAt && m.customFolderIds.includes(folderId))
+            .filter(m => {
+                const remainingFolderIds = m.customFolderIds.filter(id => id !== folderId);
+                return remainingFolderIds.length === 0 && m.excludeFromCountryFolder === true;
+            })
+            .map(m => m.id);
+
         if (targetFolder.role === 'owner') {
             const { data: otherMembers, error: membersError } = await supabase
                 .from('library_members')
@@ -156,6 +166,11 @@ export function useLibraries({
                 if (deleteLibraryError) {
                     return { success: false, message: deleteLibraryError.message };
                 }
+
+                const revokeResult = await revokeMarketLibraryDownload(folderId);
+                if (revokeResult.error) {
+                    return { success: false, message: revokeResult.error };
+                }
             }
         } else {
             const { error: removeMembershipError } = await supabase
@@ -175,10 +190,30 @@ export function useLibraries({
             delete next[folderId];
             return next;
         });
-        setMemories(prev => prev.map(m => ({
-            ...m,
-            customFolderIds: m.customFolderIds.filter(id => id !== folderId),
-        })));
+
+        const archivedAt = orphanMarketplaceMemoIds.length > 0
+            ? new Date().toISOString()
+            : null;
+
+        if (archivedAt) {
+            const { error: archiveError } = await supabase
+                .from('memories')
+                .update({ deleted_at: archivedAt })
+                .in('id', orphanMarketplaceMemoIds)
+                .eq('user_id', user.id);
+
+            if (archiveError) {
+                return { success: false, message: archiveError.message };
+            }
+        }
+
+        setMemories(prev => prev.map(m => {
+            const customFolderIds = m.customFolderIds.filter(id => id !== folderId);
+            if (archivedAt && orphanMarketplaceMemoIds.includes(m.id)) {
+                return { ...m, customFolderIds, deletedAt: archivedAt };
+            }
+            return { ...m, customFolderIds };
+        }));
 
         const storedMeta = await loadMemoryMeta(user.id);
         const nextMeta = Object.entries(storedMeta).reduce<Record<string, typeof storedMeta[string]>>(

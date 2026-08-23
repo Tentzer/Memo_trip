@@ -1,4 +1,6 @@
+import { useAuth } from '@/context/AuthContext';
 import { type CustomFolder, type Memory } from '@/context/MemoryContext';
+import { useAppTheme } from '@/context/ThemeContext';
 import { getCountryPhoto } from '@/lib/countryPhotos';
 import {
     fetchGooglePlaceDetails,
@@ -6,12 +8,14 @@ import {
     type GooglePlaceDetails,
     type PlacePrediction,
 } from '@/lib/googlePlaces';
+import { alertRequireSignIn } from '@/lib/requireSignInAlert';
 import { Ionicons } from '@expo/vector-icons';
 import { Image as ExpoImage } from 'expo-image';
 import React, { startTransition, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
     Alert,
     Animated,
+    Easing,
     FlatList,
     Keyboard,
     Modal,
@@ -37,9 +41,16 @@ type LibraryFolder = {
 };
 
 type AddMemosTab = 'saved' | 'search';
+type LibraryVariant = 'countries' | 'custom';
 
 const PLACEHOLDER_URL = 'https://placehold.co/400x400/e2e8f0/94a3b8.png?text=?';
 const UNKNOWN_LOCATION = 'Unknown Location';
+const LIBRARY_SEGMENTED_CONTROL_WIDTH = 184;
+const LIBRARY_SEGMENTED_CONTROL_PADDING = 3;
+const LIBRARY_SEGMENT_WIDTH = (LIBRARY_SEGMENTED_CONTROL_WIDTH - LIBRARY_SEGMENTED_CONTROL_PADDING * 2) / 2;
+const LIBRARY_TAB_INDICATOR_DURATION_MS = 380;
+const LIBRARY_PAGE_FADE_OUT_DURATION_MS = 180;
+const LIBRARY_PAGE_FADE_IN_DURATION_MS = 300;
 
 interface Props {
     visible: boolean;
@@ -49,8 +60,8 @@ interface Props {
     customFolders: CustomFolder[];
     createCustomFolder: (name: string) => Promise<{ success: boolean; message?: string }>;
     removeLibrary: (folderId: string) => Promise<{ success: boolean; message?: string }>;
-    shareCustomFolder: (email: string, folderId: string) => Promise<void>;
-    grantLibraryEditAccess: (email: string, folderId: string) => Promise<void>;
+    shareCustomFolder: (recipientInput: string, folderId: string) => Promise<void>;
+    grantLibraryEditAccess: (recipientInput: string, folderId: string) => Promise<void>;
     addPlaceMemory: (
         photoUri: string,
         lat: number,
@@ -64,6 +75,7 @@ interface Props {
     updateCustomFolderCover: (folderId: string) => Promise<{ success: boolean; message?: string }>;
     jumpToLocation: (lat: number, lng: number) => void;
     onShowFolderOnMap: (folderId: string, folderType: 'country' | 'custom', folderName: string) => void;
+    variant?: LibraryVariant;
 }
 
 export default function LibraryModal({
@@ -81,18 +93,24 @@ export default function LibraryModal({
     updateCustomFolderCover,
     jumpToLocation,
     onShowFolderOnMap,
+    variant = 'custom',
 }: Props) {
+    const { user } = useAuth();
+    const { theme } = useAppTheme();
+    const styles = useMemo(() => createStyles(theme.colors), [theme.colors]);
     const [selectedFolder, setSelectedFolder] = useState<LibraryFolder | null>(null);
     const [previousSelectedFolder, setPreviousSelectedFolder] = useState<LibraryFolder | null>(null);
     const [isCreateFolderVisible, setIsCreateFolderVisible] = useState(false);
     const [isAddToFolderVisible, setIsAddToFolderVisible] = useState(false);
     const [newFolderName, setNewFolderName] = useState('');
     const [isShareLibraryVisible, setIsShareLibraryVisible] = useState(false);
-    const [libraryShareEmail, setLibraryShareEmail] = useState('');
+    const [libraryShareRecipient, setLibraryShareRecipient] = useState('');
     const [isGrantAccessVisible, setIsGrantAccessVisible] = useState(false);
-    const [grantAccessEmail, setGrantAccessEmail] = useState('');
+    const [grantAccessRecipient, setGrantAccessRecipient] = useState('');
     const [isLibraryActionsVisible, setIsLibraryActionsVisible] = useState(false);
     const [addMemosTab, setAddMemosTab] = useState<AddMemosTab>('saved');
+    const [activeVariant, setActiveVariant] = useState<LibraryVariant>(variant);
+    const [targetVariant, setTargetVariant] = useState<LibraryVariant>(variant);
     const [libraryPlaceSearchQuery, setLibraryPlaceSearchQuery] = useState('');
     const [libraryPlaceSearchResults, setLibraryPlaceSearchResults] = useState<PlacePrediction[]>([]);
     const [selectedLibraryPlace, setSelectedLibraryPlace] = useState<GooglePlaceDetails | null>(null);
@@ -101,6 +119,10 @@ export default function LibraryModal({
     const { width: windowWidth } = useWindowDimensions();
     const libraryActionsBarWidth = Math.max(200, windowWidth - 88);
     const folderViewAnimation = useRef(new Animated.Value(1)).current;
+    const libraryVariantAnimation = useRef(new Animated.Value(1)).current;
+    const librarySegmentAnimation = useRef(new Animated.Value(variant === 'countries' ? 0 : 1)).current;
+    const [libraryTransitionDirection, setLibraryTransitionDirection] = useState(1);
+    const pendingVariantFadeInRef = useRef(false);
     const GOOGLE_API_KEY = process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY;
 
     useEffect(() => {
@@ -129,7 +151,44 @@ export default function LibraryModal({
         [folderViewAnimation]
     );
 
+    const libraryListAnimatedStyle = useMemo(
+        () => ({
+            opacity: libraryVariantAnimation,
+            transform: [
+                {
+                    translateX: libraryVariantAnimation.interpolate({
+                        inputRange: [0, 1],
+                        outputRange: [libraryTransitionDirection * 28, 0],
+                    }),
+                },
+            ],
+        }),
+        [libraryTransitionDirection, libraryVariantAnimation]
+    );
+
+    const librarySegmentIndicatorStyle = useMemo(
+        () => ({
+            transform: [
+                {
+                    translateX: librarySegmentAnimation.interpolate({
+                        inputRange: [0, 1],
+                        outputRange: [0, LIBRARY_SEGMENT_WIDTH],
+                    }),
+                },
+            ],
+        }),
+        [librarySegmentAnimation]
+    );
+
     useEffect(() => {
+        if (visible) {
+            setActiveVariant(variant);
+            setTargetVariant(variant);
+            libraryVariantAnimation.setValue(1);
+            librarySegmentAnimation.setValue(variant === 'countries' ? 0 : 1);
+            return;
+        }
+
         if (!visible) {
             setSelectedFolder(null);
             setPreviousSelectedFolder(null);
@@ -138,17 +197,33 @@ export default function LibraryModal({
             setIsLibraryActionsVisible(false);
             setNewFolderName('');
             setIsShareLibraryVisible(false);
-            setLibraryShareEmail('');
+            setLibraryShareRecipient('');
             setIsGrantAccessVisible(false);
-            setGrantAccessEmail('');
+            setGrantAccessRecipient('');
             setAddMemosTab('saved');
             setLibraryPlaceSearchQuery('');
             setLibraryPlaceSearchResults([]);
             setSelectedLibraryPlace(null);
             setIsSearchingLibraryPlaces(false);
             setIsAddingLibraryPlace(false);
+            setActiveVariant(variant);
+            setTargetVariant(variant);
         }
-    }, [visible]);
+    }, [librarySegmentAnimation, libraryVariantAnimation, variant, visible]);
+
+    // Start the fade-in only after React has committed the new variant's content to the view
+    // tree, preventing the old list from briefly appearing at non-zero opacity during the
+    // animation (race between native animation thread and JS render commit).
+    useEffect(() => {
+        if (!pendingVariantFadeInRef.current) return;
+        pendingVariantFadeInRef.current = false;
+        Animated.timing(libraryVariantAnimation, {
+            toValue: 1,
+            duration: LIBRARY_PAGE_FADE_IN_DURATION_MS,
+            easing: Easing.out(Easing.cubic),
+            useNativeDriver: true,
+        }).start();
+    }, [activeVariant, libraryVariantAnimation]);
 
     const visiblePersonalMemories = useMemo(
         () => memories.filter(memory => !memory.deletedAt),
@@ -205,7 +280,6 @@ export default function LibraryModal({
 
     const countryFolders = useMemo(() => {
         const folderCounts = new Map<string, number>();
-        const relatedCountryNames = new Set<string>();
 
         sortedVisibleMemories.forEach(memory => {
             if (memory.excludeFromCountryFolder) return;
@@ -213,27 +287,18 @@ export default function LibraryModal({
             folderCounts.set(countryName, (folderCounts.get(countryName) || 0) + 1);
         });
 
-        customFolders.forEach(folder => {
-            libraryMemoriesByCustomFolder.get(folder.id)?.forEach(memory => {
-                const countryName = memory.country || UNKNOWN_LOCATION;
-                if (countryName !== UNKNOWN_LOCATION) {
-                    relatedCountryNames.add(countryName);
-                }
-            });
-        });
-
-        const countryNames = new Set([...folderCounts.keys(), ...relatedCountryNames]);
-        const folders = Array.from(countryNames)
-            .map(name => ({
+        const folders = Array.from(folderCounts.entries())
+            .filter(([, count]) => count > 0)
+            .map(([name, memoCount]) => ({
                 id: `country-${name.toLowerCase()}`,
                 name,
                 type: 'country' as const,
-                memoCount: folderCounts.get(name) ?? 0,
+                memoCount,
             }))
             .sort((a, b) => a.name.localeCompare(b.name));
 
         return folders;
-    }, [customFolders, libraryMemoriesByCustomFolder, sortedVisibleMemories]);
+    }, [sortedVisibleMemories]);
 
     const customLibraryFolders = useMemo(
         () => {
@@ -255,10 +320,9 @@ export default function LibraryModal({
         [customFolders, libraryMemoriesByCustomFolder]
     );
 
-    const libraryFolders = useMemo(
-        () => [...countryFolders, ...customLibraryFolders],
-        [countryFolders, customLibraryFolders]
-    );
+    const libraryFolders = useMemo((): LibraryFolder[] => {
+        return activeVariant === 'countries' ? countryFolders : customLibraryFolders;
+    }, [activeVariant, countryFolders, customLibraryFolders]);
 
     const selectedFolderMemories = useMemo(() => {
         if (!selectedFolder) return [];
@@ -334,6 +398,50 @@ export default function LibraryModal({
         setLibraryPlaceSearchResults([]);
         setSelectedLibraryPlace(null);
     }, []);
+
+    const handleVariantChange = useCallback((nextVariant: LibraryVariant) => {
+        if (nextVariant === activeVariant) return;
+
+        Keyboard.dismiss();
+        setTargetVariant(nextVariant);
+        setLibraryTransitionDirection(nextVariant === 'custom' ? 1 : -1);
+
+        Animated.parallel([
+            Animated.timing(librarySegmentAnimation, {
+                toValue: nextVariant === 'countries' ? 0 : 1,
+                duration: LIBRARY_TAB_INDICATOR_DURATION_MS,
+                easing: Easing.out(Easing.cubic),
+                useNativeDriver: true,
+            }),
+            Animated.timing(libraryVariantAnimation, {
+                toValue: 0,
+                duration: LIBRARY_PAGE_FADE_OUT_DURATION_MS,
+                easing: Easing.out(Easing.quad),
+                useNativeDriver: true,
+            }),
+        ]).start(() => {
+            libraryVariantAnimation.setValue(0);
+            setActiveVariant(nextVariant);
+            setSelectedFolder(null);
+            setPreviousSelectedFolder(null);
+            setIsCreateFolderVisible(false);
+            setIsAddToFolderVisible(false);
+            setIsLibraryActionsVisible(false);
+            setIsShareLibraryVisible(false);
+            setLibraryShareRecipient('');
+            setIsGrantAccessVisible(false);
+            setGrantAccessRecipient('');
+            setAddMemosTab('saved');
+            clearLibraryPlaceSearch();
+            // Signal the effect to start the fade-in only after React commits the new content.
+            pendingVariantFadeInRef.current = true;
+        });
+    }, [
+        activeVariant,
+        clearLibraryPlaceSearch,
+        librarySegmentAnimation,
+        libraryVariantAnimation,
+    ]);
 
     const fetchLibraryPlaces = useCallback(async (text: string) => {
         setLibraryPlaceSearchQuery(text);
@@ -419,6 +527,10 @@ export default function LibraryModal({
     }, [onClose]);
 
     const handleCreateFolder = async () => {
+        if (!user?.id) {
+            alertRequireSignIn('Sign in to create custom libraries and organize memos.');
+            return;
+        }
         const result = await createCustomFolder(newFolderName);
 
         if (!result.success) {
@@ -457,9 +569,9 @@ export default function LibraryModal({
                         setIsAddToFolderVisible(false);
                         setIsLibraryActionsVisible(false);
                         setIsShareLibraryVisible(false);
-                        setLibraryShareEmail('');
+                        setLibraryShareRecipient('');
                         setIsGrantAccessVisible(false);
-                        setGrantAccessEmail('');
+                        setGrantAccessRecipient('');
                         setSelectedFolder(null);
                     },
                 },
@@ -483,7 +595,7 @@ export default function LibraryModal({
             visible={visible}
             onRequestClose={handleClose}
         >
-            <SafeAreaView style={{ flex: 1, backgroundColor: '#eef4ff' }}>
+            <SafeAreaView style={{ flex: 1, backgroundColor: theme.colors.backgroundSoft }}>
                 {/* Header */}
                 <View style={styles.headerContainer}>
                     <View style={styles.headerInner}>
@@ -493,9 +605,9 @@ export default function LibraryModal({
                                     setIsAddToFolderVisible(false);
                                     setIsLibraryActionsVisible(false);
                                     setIsShareLibraryVisible(false);
-                                    setLibraryShareEmail('');
+                                    setLibraryShareRecipient('');
                                     setIsGrantAccessVisible(false);
-                                    setGrantAccessEmail('');
+                                    setGrantAccessRecipient('');
                                     startTransition(() => {
                                         if (previousSelectedFolder) {
                                             setSelectedFolder(previousSelectedFolder);
@@ -507,35 +619,75 @@ export default function LibraryModal({
                                 }}
                                 style={styles.backButton}
                             >
-                                <Ionicons name="chevron-back" size={22} color="#2563eb" />
+                                <Ionicons name="chevron-back" size={22} color={theme.colors.accent} />
                             </TouchableOpacity>
                         ) : (
                             <TouchableOpacity onPress={handleClose} style={styles.backButton}>
-                                <Ionicons name="chevron-back" size={22} color="#2563eb" />
+                                <Ionicons name="chevron-back" size={22} color={theme.colors.accent} />
                             </TouchableOpacity>
                         )}
 
-                        {selectedFolder?.type === 'custom' ? (
+                        {selectedFolder ? (
                             <View style={styles.actionsContainer}>
-                                <TouchableOpacity
-                                    onPress={() => {
-                                        setIsLibraryActionsVisible(previous => {
-                                            const next = !previous;
-                                            if (!next) {
-                                                setIsAddToFolderVisible(false);
+                                <View style={styles.headerIconRow}>
+                                    {canAddMemosToFolder ? (
+                                        <TouchableOpacity
+                                            onPress={() => {
                                                 setIsShareLibraryVisible(false);
-                                                setLibraryShareEmail('');
+                                                setLibraryShareRecipient('');
                                                 setIsGrantAccessVisible(false);
-                                                setGrantAccessEmail('');
+                                                setGrantAccessRecipient('');
+                                                setIsAddToFolderVisible(prev => {
+                                                    const next = !prev;
+                                                    if (!next) {
+                                                        setAddMemosTab('saved');
+                                                        clearLibraryPlaceSearch();
+                                                    }
+                                                    return next;
+                                                });
+                                            }}
+                                            style={[
+                                                styles.folderActionButton,
+                                                { backgroundColor: isAddToFolderVisible ? '#0284c7' : '#0ea5e9' },
+                                            ]}
+                                        >
+                                            <Ionicons name={isAddToFolderVisible ? 'close' : 'add'} size={20} color="white" />
+                                        </TouchableOpacity>
+                                    ) : null}
+                                    <TouchableOpacity
+                                        onPress={() => {
+                                            if (selectedFolderMemories.length === 0) {
+                                                Alert.alert('No memos yet', 'This folder has no memos to show on the map.');
+                                                return;
                                             }
-                                            return next;
-                                        });
-                                    }}
-                                    style={styles.iconButton}
-                                >
-                                    <Ionicons name="settings-outline" size={20} color="#334155" />
-                                </TouchableOpacity>
-                                {isLibraryActionsVisible ? (
+                                            onShowFolderOnMap(selectedFolder.id, selectedFolder.type, selectedFolder.name);
+                                        }}
+                                        style={styles.folderActionButton}
+                                    >
+                                        <Ionicons name="map-outline" size={20} color="white" />
+                                    </TouchableOpacity>
+                                    {selectedFolder.type === 'custom' ? (
+                                        <TouchableOpacity
+                                            onPress={() => {
+                                                setIsLibraryActionsVisible(previous => {
+                                                    const next = !previous;
+                                                    if (!next) {
+                                                        setIsAddToFolderVisible(false);
+                                                        setIsShareLibraryVisible(false);
+                                                        setLibraryShareRecipient('');
+                                                        setIsGrantAccessVisible(false);
+                                                        setGrantAccessRecipient('');
+                                                    }
+                                                    return next;
+                                                });
+                                            }}
+                                            style={styles.iconButton}
+                                        >
+                                            <Ionicons name="settings-outline" size={20} color={theme.colors.textSecondary} />
+                                        </TouchableOpacity>
+                                    ) : null}
+                                </View>
+                                {selectedFolder.type === 'custom' && isLibraryActionsVisible ? (
                                     <View style={[styles.actionsRow, { maxWidth: libraryActionsBarWidth }]}>
                                         <ScrollView
                                             horizontal
@@ -546,9 +698,7 @@ export default function LibraryModal({
                                         >
                                         {canChangeCover ? (
                                             <TouchableOpacity
-                                                onPress={() => {
-                                                    void handleUpdateSelectedLibraryCover();
-                                                }}
+                                                onPress={() => { void handleUpdateSelectedLibraryCover(); }}
                                                 style={[styles.actionChip, { backgroundColor: '#7c3aed' }]}
                                             >
                                                 <Ionicons name="image-outline" size={15} color="white" />
@@ -559,7 +709,7 @@ export default function LibraryModal({
                                             <TouchableOpacity
                                                 onPress={() => {
                                                     setIsGrantAccessVisible(false);
-                                                    setGrantAccessEmail('');
+                                                    setGrantAccessRecipient('');
                                                     setIsAddToFolderVisible(false);
                                                     setIsShareLibraryVisible(prev => !prev);
                                                 }}
@@ -573,7 +723,7 @@ export default function LibraryModal({
                                             <TouchableOpacity
                                                 onPress={() => {
                                                     setIsShareLibraryVisible(false);
-                                                    setLibraryShareEmail('');
+                                                    setLibraryShareRecipient('');
                                                     setIsAddToFolderVisible(false);
                                                     setIsGrantAccessVisible(prev => !prev);
                                                 }}
@@ -599,14 +749,63 @@ export default function LibraryModal({
                         ) : null}
 
                         {!selectedFolder ? (
+                            <View style={styles.librarySegmentedControl}>
+                                <Animated.View
+                                    pointerEvents="none"
+                                    style={[
+                                        styles.librarySegmentIndicator,
+                                        librarySegmentIndicatorStyle,
+                                    ]}
+                                />
+                                <TouchableOpacity
+                                    onPress={() => handleVariantChange('countries')}
+                                    style={[
+                                        styles.librarySegment,
+                                    ]}
+                                >
+                                    <Text
+                                        style={[
+                                            styles.librarySegmentText,
+                                            activeVariant === 'countries' ? styles.librarySegmentTextActive : null,
+                                        ]}
+                                    >
+                                        Countries
+                                    </Text>
+                                </TouchableOpacity>
+                                <TouchableOpacity
+                                    onPress={() => handleVariantChange('custom')}
+                                    style={[
+                                        styles.librarySegment,
+                                    ]}
+                                >
+                                    <Text
+                                        style={[
+                                            styles.librarySegmentText,
+                                            activeVariant === 'custom' ? styles.librarySegmentTextActive : null,
+                                        ]}
+                                    >
+                                        Private
+                                    </Text>
+                                </TouchableOpacity>
+                            </View>
+                        ) : null}
+
+                        {targetVariant === 'custom' && !selectedFolder ? (
                             <TouchableOpacity
-                                onPress={() => setIsCreateFolderVisible(prev => !prev)}
+                                onPress={() => {
+                                    if (!user?.id) {
+                                        alertRequireSignIn('Sign in to create custom libraries and organize memos.');
+                                        return;
+                                    }
+                                    setIsCreateFolderVisible((prev) => !prev);
+                                }}
                                 style={[styles.createFolderButton, styles.headerCreateFolderButton]}
                             >
-                                <Ionicons name="add-circle-outline" size={18} color="white" />
-                                <Text style={{ color: 'white', fontWeight: '700' }}>
-                                    {isCreateFolderVisible ? 'Hide' : 'Create Folder'}
-                                </Text>
+                                <Ionicons
+                                    name={isCreateFolderVisible ? 'close' : 'add'}
+                                    size={22}
+                                    color="white"
+                                />
                             </TouchableOpacity>
                         ) : null}
                     </View>
@@ -614,171 +813,183 @@ export default function LibraryModal({
 
                 {/* Body */}
                 {!selectedFolder ? (
-                    <FlatList
-                        data={libraryFolders}
-                        numColumns={2}
-                        key="folder-grid"
-                        keyExtractor={(item) => item.id}
-                        contentContainerStyle={{ padding: 14, paddingBottom: 32 }}
-                        ListHeaderComponent={
-                            isCreateFolderVisible ? (
-                                <View style={styles.infoCard}>
-                                    <View style={styles.createFolderForm}>
-                                        <Text style={{ fontSize: 16, fontWeight: '700', color: '#0f172a' }}>
-                                            New Custom Folder
-                                        </Text>
-                                        <Text style={{ color: '#64748b', marginTop: 4, lineHeight: 20 }}>
-                                            Create folders like Food, Museums, or Friends and then add memos to them.
-                                        </Text>
-                                        <TextInput
-                                            style={styles.folderNameInput}
-                                            placeholder="Folder name"
-                                            placeholderTextColor="#94a3b8"
-                                            value={newFolderName}
-                                            onChangeText={setNewFolderName}
-                                            returnKeyType="done"
-                                            onSubmitEditing={handleCreateFolder}
-                                        />
-                                        <View style={{ flexDirection: 'row', gap: 10, marginTop: 14 }}>
-                                            <TouchableOpacity onPress={handleCreateFolder} style={styles.primaryButton}>
-                                                <Text style={{ color: 'white', fontWeight: '700' }}>Save Folder</Text>
-                                            </TouchableOpacity>
-                                            <TouchableOpacity
-                                                onPress={() => {
-                                                    Keyboard.dismiss();
-                                                    setIsCreateFolderVisible(false);
-                                                    setNewFolderName('');
-                                                }}
-                                                style={styles.secondaryButton}
-                                            >
-                                                <Text style={{ color: '#475569', fontWeight: '700' }}>Cancel</Text>
-                                            </TouchableOpacity>
+                    <Animated.View style={[styles.libraryListContainer, libraryListAnimatedStyle]}>
+                        <FlatList
+                            data={libraryFolders}
+                            numColumns={2}
+                            key={`folder-grid-${activeVariant}`}
+                            keyExtractor={(item) => item.id}
+                            contentContainerStyle={{ padding: 14, paddingBottom: 32 }}
+                            ListHeaderComponent={
+                                activeVariant === 'custom' && isCreateFolderVisible ? (
+                                    <View style={styles.infoCard}>
+                                        <View style={styles.createFolderForm}>
+                                            <Text style={[styles.panelInlineTitle]}>
+                                                New Custom Folder
+                                            </Text>
+                                            <Text style={styles.panelInlineText}>
+                                                Create folders like Food, Museums, or Friends and then add memos to them.
+                                            </Text>
+                                            <TextInput
+                                                style={styles.folderNameInput}
+                                                placeholder="Folder name"
+                                                placeholderTextColor={theme.colors.placeholder}
+                                                value={newFolderName}
+                                                onChangeText={setNewFolderName}
+                                                returnKeyType="done"
+                                                onSubmitEditing={handleCreateFolder}
+                                            />
+                                            <View style={{ flexDirection: 'row', gap: 10, marginTop: 14 }}>
+                                                <TouchableOpacity onPress={handleCreateFolder} style={styles.primaryButton}>
+                                                    <Text style={{ color: 'white', fontWeight: '700' }}>Save Folder</Text>
+                                                </TouchableOpacity>
+                                                <TouchableOpacity
+                                                    onPress={() => {
+                                                        Keyboard.dismiss();
+                                                        setIsCreateFolderVisible(false);
+                                                        setNewFolderName('');
+                                                    }}
+                                                    style={styles.secondaryButton}
+                                                >
+                                                    <Text style={styles.secondaryButtonText}>Cancel</Text>
+                                                </TouchableOpacity>
+                                            </View>
                                         </View>
                                     </View>
-                                </View>
-                            ) : null
-                        }
-                        ListEmptyComponent={
-                            <View style={styles.emptyCard}>
-                                <Ionicons name="images-outline" size={36} color="#94a3b8" />
-                                <Text style={{ marginTop: 12, fontSize: 16, fontWeight: '600', color: '#0f172a' }}>
-                                    No memos yet
-                                </Text>
-                                <Text style={{ marginTop: 6, color: '#64748b', textAlign: 'center' }}>
-                                    Take your first photo and it will appear in a country folder automatically.
-                                </Text>
-                            </View>
-                        }
-                        renderItem={({ item }) => (
-                            <TouchableOpacity
-                                onPress={() => {
-                                    setIsAddToFolderVisible(false);
-                                    setIsLibraryActionsVisible(false);
-                                    setIsShareLibraryVisible(false);
-                                    setLibraryShareEmail('');
-                                    setIsGrantAccessVisible(false);
-                                    setGrantAccessEmail('');
-                                    startTransition(() => {
-                                        setSelectedFolder(item);
-                                    });
-                                }}
-                                style={styles.folderCard}
-                            >
-                                {item.type === 'country' ? (
-                                    <View style={styles.countryFolderBackground}>
-                                        <ExpoImage
-                                            source={getCountryPhoto(item.name)}
-                                            style={StyleSheet.absoluteFillObject}
-                                            contentFit="cover"
-                                            cachePolicy="memory-disk"
-                                            transition={0}
-                                        />
-                                        <View style={styles.countryFolderOverlay} />
-                                        <View style={styles.countryFolderContent}>
-                                            <Text style={styles.countryFolderTitle} numberOfLines={2}>
-                                                {item.name}
-                                            </Text>
-                                            <Text style={styles.countryFolderCount}>
-                                                {item.memoCount} memo{item.memoCount === 1 ? '' : 's'}
-                                            </Text>
-                                        </View>
+                                ) : null
+                            }
+                            ListEmptyComponent={
+                                activeVariant === 'countries' ? (
+                                    <View style={styles.emptyCard}>
+                                        <Ionicons name="images-outline" size={36} color={theme.colors.textMuted} />
+                                        <Text style={styles.emptyInlineTitle}>
+                                            No country folders yet
+                                        </Text>
+                                        <Text style={styles.emptyInlineText}>
+                                            Save memos from different countries and they will appear here automatically.
+                                        </Text>
                                     </View>
                                 ) : (
-                                    item.coverImageUrl ? (
-                                        <View style={styles.customFolderBackground}>
+                                    <View style={styles.emptyCard}>
+                                        <Ionicons name="folder-open-outline" size={36} color={theme.colors.textMuted} />
+                                        <Text style={styles.emptyInlineTitle}>
+                                            No custom libraries yet
+                                        </Text>
+                                        <Text style={styles.emptyInlineText}>
+                                            Tap Create Folder above to add your first library.
+                                        </Text>
+                                    </View>
+                                )
+                            }
+                            renderItem={({ item }) => (
+                                <TouchableOpacity
+                                    onPress={() => {
+                                        setIsAddToFolderVisible(false);
+                                        setIsLibraryActionsVisible(false);
+                                        setIsShareLibraryVisible(false);
+                                        setLibraryShareRecipient('');
+                                        setIsGrantAccessVisible(false);
+                                        setGrantAccessRecipient('');
+                                        startTransition(() => {
+                                            setSelectedFolder(item);
+                                        });
+                                    }}
+                                    style={styles.folderCard}
+                                >
+                                    {item.type === 'country' ? (
+                                        <View style={styles.countryFolderBackground}>
                                             <ExpoImage
-                                                source={{ uri: item.coverImageUrl }}
+                                                source={getCountryPhoto(item.name)}
                                                 style={StyleSheet.absoluteFillObject}
                                                 contentFit="cover"
                                                 cachePolicy="memory-disk"
+                                                transition={0}
                                             />
-                                            <View style={styles.customFolderOverlay} />
-                                            <View style={styles.customFolderCoverContent}>
-                                                <Text style={styles.customFolderCoverTitle} numberOfLines={2}>
+                                            <View style={styles.countryFolderOverlay} />
+                                            <View style={styles.countryFolderContent}>
+                                                <Text style={styles.countryFolderTitle} numberOfLines={2}>
                                                     {item.name}
                                                 </Text>
-                                                <Text style={styles.customFolderCoverCount}>
+                                                <Text style={styles.countryFolderCount}>
                                                     {item.memoCount} memo{item.memoCount === 1 ? '' : 's'}
                                                 </Text>
-                                                <View style={styles.sharedLibraryCoverLabelRow}>
-                                                    {item.isShared ? <View style={styles.sharedLibraryCoverDot} /> : null}
-                                                    <Text style={styles.customFolderCoverLabel}>
+                                            </View>
+                                        </View>
+                                    ) : (
+                                        item.coverImageUrl ? (
+                                            <View style={styles.customFolderBackground}>
+                                                <ExpoImage
+                                                    source={{ uri: item.coverImageUrl }}
+                                                    style={StyleSheet.absoluteFillObject}
+                                                    contentFit="cover"
+                                                    cachePolicy="memory-disk"
+                                                />
+                                                <View style={styles.customFolderOverlay} />
+                                                <View style={styles.customFolderCoverContent}>
+                                                    <Text style={styles.customFolderCoverTitle} numberOfLines={2}>
+                                                        {item.name}
+                                                    </Text>
+                                                    <Text style={styles.customFolderCoverCount}>
+                                                        {item.memoCount} memo{item.memoCount === 1 ? '' : 's'}
+                                                    </Text>
+                                                    <View style={styles.sharedLibraryCoverLabelRow}>
+                                                        {item.isShared ? <View style={styles.sharedLibraryCoverDot} /> : null}
+                                                        <Text style={styles.customFolderCoverLabel}>
+                                                            {item.isShared ? 'Shared library' : 'Custom folder'}
+                                                        </Text>
+                                                    </View>
+                                                </View>
+                                            </View>
+                                        ) : (
+                                            <View style={styles.customFolderContent}>
+                                                <View style={styles.customFolderIcon}>
+                                                    <Ionicons name="folder-open" size={24} color={theme.colors.accentText} />
+                                                </View>
+                                                <Text style={styles.customFolderTitle} numberOfLines={2}>
+                                                    {item.name}
+                                                </Text>
+                                                <Text style={styles.customFolderCount}>
+                                                    {item.memoCount} memo{item.memoCount === 1 ? '' : 's'}
+                                                </Text>
+                                                <View style={styles.sharedLibraryLabelRow}>
+                                                    {item.isShared ? <View style={styles.sharedLibraryDot} /> : null}
+                                                    <Text style={styles.customFolderLabel}>
                                                         {item.isShared ? 'Shared library' : 'Custom folder'}
                                                     </Text>
                                                 </View>
                                             </View>
-                                        </View>
-                                    ) : (
-                                        <View style={styles.customFolderContent}>
-                                            <View style={styles.customFolderIcon}>
-                                                <Ionicons name="folder-open" size={24} color="#1d4ed8" />
-                                            </View>
-                                            <Text style={styles.customFolderTitle} numberOfLines={2}>
-                                                {item.name}
-                                            </Text>
-                                            <Text style={styles.customFolderCount}>
-                                                {item.memoCount} memo{item.memoCount === 1 ? '' : 's'}
-                                            </Text>
-                                            <View style={styles.sharedLibraryLabelRow}>
-                                                {item.isShared ? <View style={styles.sharedLibraryDot} /> : null}
-                                                <Text style={styles.customFolderLabel}>
-                                                    {item.isShared ? 'Shared library' : 'Custom folder'}
-                                                </Text>
-                                            </View>
-                                        </View>
-                                    )
-                                )}
-                            </TouchableOpacity>
-                        )}
-                    />
+                                        )
+                                    )}
+                                </TouchableOpacity>
+                            )}
+                        />
+                    </Animated.View>
                 ) : (
                     <Animated.View style={[styles.selectedFolderView, folderViewAnimatedStyle]}>
                         {selectedFolder.type === 'custom' ? (
                             <View style={{ paddingHorizontal: 16, paddingVertical: 12 }}>
                                 {isShareLibraryVisible && canShareSelectedFolder ? (
                                     <View style={styles.panelCard}>
-                                        <Text style={{ fontSize: 16, fontWeight: '700', color: '#0f172a' }}>
+                                        <Text style={styles.panelInlineTitle}>
                                             Share {selectedFolder.name}
                                         </Text>
-                                        <Text style={{ color: '#64748b', marginTop: 4 }}>
-                                            Invite another MemoTrip user to open this library without duplicating the JPG files.
-                                        </Text>
                                         <TextInput
-                                            value={libraryShareEmail}
-                                            onChangeText={setLibraryShareEmail}
-                                            placeholder="User's email"
-                                            placeholderTextColor="#94a3b8"
+                                            value={libraryShareRecipient}
+                                            onChangeText={setLibraryShareRecipient}
+                                            placeholder="Friend's username"
+                                            placeholderTextColor={theme.colors.placeholder}
                                             autoCapitalize="none"
-                                            keyboardType="email-address"
-                                            className="h-12 border border-gray-200 rounded-xl px-4 text-slate-800 font-medium mt-4"
+                                            autoCorrect={false}
+                                            keyboardType="default"
+                                            style={styles.folderNameInput}
                                             returnKeyType="send"
                                         />
                                         <View style={{ flexDirection: 'row', gap: 10, marginTop: 14 }}>
                                             <TouchableOpacity
                                                 onPress={async () => {
-                                                    await shareCustomFolder(libraryShareEmail.trim(), selectedFolder.id);
+                                                    await shareCustomFolder(libraryShareRecipient.trim(), selectedFolder.id);
                                                     setIsShareLibraryVisible(false);
-                                                    setLibraryShareEmail('');
+                                                    setLibraryShareRecipient('');
                                                 }}
                                                 style={styles.sendInviteButton}
                                             >
@@ -787,11 +998,11 @@ export default function LibraryModal({
                                             <TouchableOpacity
                                                 onPress={() => {
                                                     setIsShareLibraryVisible(false);
-                                                    setLibraryShareEmail('');
+                                                    setLibraryShareRecipient('');
                                                 }}
                                                 style={styles.secondaryButton}
                                             >
-                                                <Text style={{ color: '#475569', fontWeight: '700' }}>Cancel</Text>
+                                                <Text style={styles.secondaryButtonText}>Cancel</Text>
                                             </TouchableOpacity>
                                         </View>
                                     </View>
@@ -799,28 +1010,26 @@ export default function LibraryModal({
 
                                 {isGrantAccessVisible && canGrantEditAccess ? (
                                     <View style={styles.panelCard}>
-                                        <Text style={{ fontSize: 16, fontWeight: '700', color: '#0f172a' }}>
+                                        <Text style={styles.panelInlineTitle}>
                                             Grant edit access for {selectedFolder.name}
                                         </Text>
-                                        <Text style={{ color: '#64748b', marginTop: 4 }}>
-                                            Let one of your friends add memos to this library.
-                                        </Text>
                                         <TextInput
-                                            value={grantAccessEmail}
-                                            onChangeText={setGrantAccessEmail}
-                                            placeholder="User's email"
-                                            placeholderTextColor="#94a3b8"
+                                            value={grantAccessRecipient}
+                                            onChangeText={setGrantAccessRecipient}
+                                            placeholder="Their username"
+                                            placeholderTextColor={theme.colors.placeholder}
                                             autoCapitalize="none"
-                                            keyboardType="email-address"
-                                            className="h-12 border border-gray-200 rounded-xl px-4 text-slate-800 font-medium mt-4"
+                                            autoCorrect={false}
+                                            keyboardType="default"
+                                            style={styles.folderNameInput}
                                             returnKeyType="send"
                                         />
                                         <View style={{ flexDirection: 'row', gap: 10, marginTop: 14 }}>
                                             <TouchableOpacity
                                                 onPress={async () => {
-                                                    await grantLibraryEditAccess(grantAccessEmail.trim(), selectedFolder.id);
+                                                    await grantLibraryEditAccess(grantAccessRecipient.trim(), selectedFolder.id);
                                                     setIsGrantAccessVisible(false);
-                                                    setGrantAccessEmail('');
+                                                    setGrantAccessRecipient('');
                                                 }}
                                                 style={styles.sendInviteButton}
                                             >
@@ -829,11 +1038,11 @@ export default function LibraryModal({
                                             <TouchableOpacity
                                                 onPress={() => {
                                                     setIsGrantAccessVisible(false);
-                                                    setGrantAccessEmail('');
+                                                    setGrantAccessRecipient('');
                                                 }}
                                                 style={styles.secondaryButton}
                                             >
-                                                <Text style={{ color: '#475569', fontWeight: '700' }}>Cancel</Text>
+                                                <Text style={styles.secondaryButtonText}>Cancel</Text>
                                             </TouchableOpacity>
                                         </View>
                                     </View>
@@ -841,10 +1050,10 @@ export default function LibraryModal({
 
                                 {isAddToFolderVisible ? (
                                     <View style={styles.panelCard}>
-                                        <Text style={{ fontSize: 16, fontWeight: '700', color: '#0f172a' }}>
+                                        <Text style={styles.panelInlineTitle}>
                                             Add photos to {selectedFolder.name}
                                         </Text>
-                                        <Text style={{ color: '#64748b', marginTop: 4 }}>
+                                        <Text style={styles.panelInlineText}>
                                             Add saved memos or search Google Maps for a new place.
                                         </Text>
                                         <View style={styles.addMemosTabs}>
@@ -886,14 +1095,14 @@ export default function LibraryModal({
                                                 nestedScrollEnabled
                                                 ListEmptyComponent={
                                                     <View style={{ paddingVertical: 24, alignItems: 'center' }}>
-                                                        <Ionicons name="camera-outline" size={32} color="#94a3b8" />
-                                                        <Text style={{ marginTop: 10, color: '#64748b', textAlign: 'center' }}>
+                                                        <Ionicons name="camera-outline" size={32} color={theme.colors.textMuted} />
+                                                        <Text style={styles.emptyInlineText}>
                                                             Take a photo first, then you can place it in this library.
                                                         </Text>
                                                     </View>
                                                 }
                                                 ItemSeparatorComponent={() => (
-                                                    <View style={{ height: 1, backgroundColor: '#e2e8f0', marginVertical: 10 }} />
+                                                    <View style={{ height: 1, backgroundColor: theme.colors.border, marginVertical: 10 }} />
                                                 )}
                                                 renderItem={({ item }) => {
                                                     const isInCustomFolder = item.customFolderIds.includes(
@@ -906,17 +1115,19 @@ export default function LibraryModal({
                                                         <View style={{ flexDirection: 'row', alignItems: 'center' }}>
                                                             <ExpoImage
                                                                 source={{ uri: item.uri }}
-                                                                style={{ width: 62, height: 62, borderRadius: 16, backgroundColor: '#e2e8f0' }}
+                                                                style={{ width: 62, height: 62, borderRadius: 16, backgroundColor: theme.colors.surfaceMuted }}
                                                                 contentFit="cover"
                                                                 cachePolicy="memory-disk"
                                                             />
                                                             <View style={{ flex: 1, marginLeft: 12 }}>
-                                                                <Text style={{ fontSize: 15, fontWeight: '700', color: '#0f172a' }}>
+                                                                <Text style={styles.savedMemoTitle} numberOfLines={1}>
                                                                     {displayTitle}
                                                                 </Text>
-                                                                <Text style={{ color: '#64748b', marginTop: 4 }}>
-                                                                    {new Date(item.created_at).toLocaleDateString()}
-                                                                </Text>
+                                                                {item.description ? (
+                                                                    <Text style={styles.savedMemoDescription} numberOfLines={1}>
+                                                                        {item.description}
+                                                                    </Text>
+                                                                ) : null}
                                                             </View>
                                                             <TouchableOpacity
                                                                 onPress={() => toggleMemoryInCustomFolder(item.id, selectedFolder.id)}
@@ -936,18 +1147,18 @@ export default function LibraryModal({
                                         ) : (
                                             <View style={styles.libraryPlaceSearchContainer}>
                                                 <View style={styles.libraryPlaceSearchInputRow}>
-                                                    <Ionicons name="search" size={18} color="#64748b" />
+                                                    <Ionicons name="search" size={18} color={theme.colors.textMuted} />
                                                     <TextInput
                                                         value={libraryPlaceSearchQuery}
                                                         onChangeText={fetchLibraryPlaces}
                                                         placeholder="Search Google Maps"
-                                                        placeholderTextColor="#94a3b8"
+                                                        placeholderTextColor={theme.colors.placeholder}
                                                         returnKeyType="search"
                                                         style={styles.libraryPlaceSearchInput}
                                                     />
                                                     {libraryPlaceSearchQuery.length > 0 ? (
                                                         <TouchableOpacity onPress={clearLibraryPlaceSearch}>
-                                                            <Ionicons name="close-circle" size={20} color="#cbd5e1" />
+                                                            <Ionicons name="close-circle" size={20} color={theme.colors.borderStrong} />
                                                         </TouchableOpacity>
                                                     ) : null}
                                                 </View>
@@ -1030,9 +1241,9 @@ export default function LibraryModal({
                                                 setIsAddToFolderVisible(false);
                                                 setIsLibraryActionsVisible(false);
                                                 setIsShareLibraryVisible(false);
-                                                setLibraryShareEmail('');
+                                                setLibraryShareRecipient('');
                                                 setIsGrantAccessVisible(false);
-                                                setGrantAccessEmail('');
+                                                setGrantAccessRecipient('');
                                                 startTransition(() => {
                                                     setPreviousSelectedFolder(selectedFolder);
                                                     setSelectedFolder(item);
@@ -1064,51 +1275,6 @@ export default function LibraryModal({
                             </View>
                         ) : null}
 
-                        <View style={{ paddingHorizontal: 16, paddingBottom: 10 }}>
-                            {canAddMemosToFolder ? (
-                                <TouchableOpacity
-                                    onPress={() => {
-                                        setIsShareLibraryVisible(false);
-                                        setLibraryShareEmail('');
-                                        setIsGrantAccessVisible(false);
-                                        setGrantAccessEmail('');
-                                        setIsAddToFolderVisible(prev => {
-                                            const next = !prev;
-                                            if (!next) {
-                                                setAddMemosTab('saved');
-                                                clearLibraryPlaceSearch();
-                                            }
-                                            return next;
-                                        });
-                                    }}
-                                    style={[
-                                        styles.showOnMapButton,
-                                        {
-                                            backgroundColor: isAddToFolderVisible ? '#047857' : '#065F46',
-                                            marginBottom: 10,
-                                        },
-                                    ]}
-                                >
-                                    <Ionicons name="add" size={17} color="white" />
-                                    <Text style={styles.showOnMapButtonText}>Add Memos</Text>
-                                </TouchableOpacity>
-                            ) : null}
-                            <TouchableOpacity
-                                onPress={() => {
-                                    if (selectedFolderMemories.length === 0) {
-                                        Alert.alert('No memos yet', 'This folder has no memos to show on the map.');
-                                        return;
-                                    }
-                                    onShowFolderOnMap(selectedFolder.id, selectedFolder.type, selectedFolder.name);
-                                    handleClose();
-                                }}
-                                style={styles.showOnMapButton}
-                            >
-                                <Ionicons name="map-outline" size={17} color="white" />
-                                <Text style={styles.showOnMapButtonText}>Show on map</Text>
-                            </TouchableOpacity>
-                        </View>
-
                         <FlatList
                             data={selectedFolderMemories}
                             numColumns={3}
@@ -1120,11 +1286,11 @@ export default function LibraryModal({
                             contentContainerStyle={{ paddingHorizontal: 10, paddingBottom: 24, paddingTop: 0 }}
                             ListEmptyComponent={
                                 <View style={styles.emptyFolderCard}>
-                                    <Ionicons name="folder-open-outline" size={38} color="#94a3b8" />
-                                    <Text style={{ marginTop: 12, fontSize: 16, fontWeight: '600', color: '#0f172a' }}>
+                                    <Ionicons name="folder-open-outline" size={38} color={theme.colors.textMuted} />
+                                    <Text style={styles.emptyInlineTitle}>
                                         This folder is empty
                                     </Text>
-                                    <Text style={{ marginTop: 6, color: '#64748b', textAlign: 'center' }}>
+                                    <Text style={styles.emptyInlineText}>
                                         {selectedFolder.type === 'country'
                                             ? 'New photos taken in this country will appear here automatically.'
                                             : selectedCustomFolder?.role === 'viewer'
@@ -1134,32 +1300,34 @@ export default function LibraryModal({
                                 </View>
                             }
                             renderItem={({ item, index }) => {
-                                const rotation = (index % 2 === 0 ? 1 : -1) * 2;
+                                const POLAROID_ROTATIONS = [-2.5, 1.8, -1.3, 2.6, -1.8, 2.2, -2.8, 1.4];
+                                const rotation = POLAROID_ROTATIONS[index % POLAROID_ROTATIONS.length];
                                 return (
                                     <TouchableOpacity
                                         onPress={() => {
                                             handleClose();
                                             jumpToLocation(item.latitude, item.longitude);
                                         }}
-                                        style={{ flex: 1 / 3, padding: 8 }}
+                                        style={{ flex: 1 / 3, padding: 10 }}
                                     >
-                                        <View style={[styles.memoGridItem, { transform: [{ rotate: `${rotation}deg` }] }]}>
-                                            <ExpoImage
-                                                source={{ uri: item.uri }}
-                                                style={{ width: '100%', aspectRatio: 1 }}
-                                                contentFit="cover"
-                                                cachePolicy="memory-disk"
-                                            />
-                                            {item.title ? (
-                                                <Text numberOfLines={1} style={styles.memoGridTitle}>
-                                                    {item.title}
-                                                </Text>
-                                            ) : null}
-                                            <Text style={[styles.memoGridDate, { marginTop: item.title ? 2 : 4 }]}>
-                                                {item.created_at
-                                                    ? new Date(item.created_at).toLocaleDateString()
-                                                    : 'Recent'}
-                                            </Text>
+                                        {/* Ambient (soft) shadow layer */}
+                                        <View style={[styles.memoGridAmbientShadow, { transform: [{ rotate: `${rotation}deg` }] }]}>
+                                            {/* Directional (crisp) shadow layer + polaroid body */}
+                                            <View style={styles.memoGridItem}>
+                                                <View style={styles.memoGridImageFrame}>
+                                                    <ExpoImage
+                                                        source={{ uri: item.uri }}
+                                                        style={{ width: '100%', aspectRatio: 1 }}
+                                                        contentFit="cover"
+                                                        cachePolicy="memory-disk"
+                                                    />
+                                                </View>
+                                                {item.title ? (
+                                                    <Text numberOfLines={1} style={styles.memoGridTitle}>
+                                                        {item.title}
+                                                    </Text>
+                                                ) : null}
+                                            </View>
                                         </View>
                                     </TouchableOpacity>
                                 );
@@ -1172,20 +1340,25 @@ export default function LibraryModal({
     );
 }
 
-const styles = StyleSheet.create({
+type ThemeColors = ReturnType<typeof useAppTheme>['theme']['colors'];
+
+const createStyles = (colors: ThemeColors) => StyleSheet.create({
     headerContainer: {
         paddingHorizontal: 16,
         paddingTop: 8,
         paddingBottom: 14,
-        backgroundColor: '#eef4ff',
+        backgroundColor: colors.backgroundSoft,
     },
     headerInner: {
-        minHeight: 68,
-        justifyContent: 'center',
+        minHeight: 82,
+        justifyContent: 'flex-end',
         alignItems: 'center',
         position: 'relative',
     },
     selectedFolderView: {
+        flex: 1,
+    },
+    libraryListContainer: {
         flex: 1,
     },
     headerTitleGroup: {
@@ -1195,14 +1368,53 @@ const styles = StyleSheet.create({
     },
     headerTitle: {
         fontWeight: '800',
-        color: '#1e3a8a',
+        color: colors.accentText,
         textAlign: 'center',
     },
     headerSubtitle: {
         fontSize: 13,
-        color: '#5b6b85',
+        color: colors.textMuted,
         marginTop: 4,
         textAlign: 'center',
+    },
+    librarySegmentedControl: {
+        flexDirection: 'row',
+        width: LIBRARY_SEGMENTED_CONTROL_WIDTH,
+        padding: LIBRARY_SEGMENTED_CONTROL_PADDING,
+        borderRadius: 999,
+        backgroundColor: colors.surfaceMuted,
+        borderWidth: 1,
+        borderColor: colors.border,
+        overflow: 'hidden',
+    },
+    librarySegmentIndicator: {
+        position: 'absolute',
+        left: LIBRARY_SEGMENTED_CONTROL_PADDING,
+        top: LIBRARY_SEGMENTED_CONTROL_PADDING,
+        width: LIBRARY_SEGMENT_WIDTH,
+        height: 28,
+        borderRadius: 999,
+        backgroundColor: colors.surfaceElevated,
+        shadowColor: colors.shadow,
+        shadowOpacity: 0.08,
+        shadowRadius: 6,
+        elevation: 1,
+    },
+    librarySegment: {
+        flex: 1,
+        minHeight: 28,
+        borderRadius: 999,
+        alignItems: 'center',
+        justifyContent: 'center',
+        zIndex: 1,
+    },
+    librarySegmentText: {
+        fontSize: 12,
+        fontWeight: '800',
+        color: colors.textMuted,
+    },
+    librarySegmentTextActive: {
+        color: colors.accentText,
     },
     backButton: {
         position: 'absolute',
@@ -1210,12 +1422,12 @@ const styles = StyleSheet.create({
         width: 42,
         height: 42,
         borderRadius: 21,
-        backgroundColor: 'rgba(255,255,255,0.92)',
+        backgroundColor: colors.surfaceElevated,
         alignItems: 'center',
         justifyContent: 'center',
         borderWidth: 1,
-        borderColor: '#d7e2f2',
-        shadowColor: '#0f172a',
+        borderColor: colors.border,
+        shadowColor: colors.shadow,
         shadowOpacity: 0.08,
         shadowRadius: 8,
         elevation: 2,
@@ -1230,12 +1442,12 @@ const styles = StyleSheet.create({
         width: 42,
         height: 42,
         borderRadius: 21,
-        backgroundColor: 'rgba(255,255,255,0.92)',
+        backgroundColor: colors.surfaceElevated,
         alignItems: 'center',
         justifyContent: 'center',
         borderWidth: 1,
-        borderColor: '#d7e2f2',
-        shadowColor: '#0f172a',
+        borderColor: colors.border,
+        shadowColor: colors.shadow,
         shadowOpacity: 0.08,
         shadowRadius: 8,
         elevation: 2,
@@ -1268,55 +1480,58 @@ const styles = StyleSheet.create({
         fontWeight: '700',
     },
     infoCard: {
-        backgroundColor: 'white',
+        backgroundColor: colors.surface,
         borderRadius: 20,
         padding: 18,
         marginBottom: 14,
-        shadowColor: '#000',
+        shadowColor: colors.shadow,
         shadowOpacity: 0.06,
         shadowRadius: 10,
         elevation: 2,
     },
     createFolderButton: {
-        backgroundColor: '#065F46',
-        paddingHorizontal: 14,
-        paddingVertical: 9,
-        borderRadius: 14,
-        flexDirection: 'row',
+        width: 42,
+        height: 42,
+        borderRadius: 21,
+        backgroundColor: '#0ea5e9',
         alignItems: 'center',
-        gap: 6,
+        justifyContent: 'center',
+        shadowColor: '#0f172a',
+        shadowOpacity: 0.1,
+        shadowRadius: 8,
+        elevation: 2,
     },
     headerCreateFolderButton: {
         position: 'absolute',
         right: 0,
-        top: 12,
+        top: 10,
     },
     createFolderForm: {
         marginTop: 16,
         borderWidth: 1,
-        borderColor: '#dbe4ea',
+        borderColor: colors.border,
         borderRadius: 18,
         padding: 16,
-        backgroundColor: '#f8fafc',
+        backgroundColor: colors.surfaceMuted,
     },
     folderNameInput: {
         marginTop: 14,
         height: 48,
         borderWidth: 1,
-        borderColor: '#cbd5e1',
+        borderColor: colors.border,
         borderRadius: 14,
         paddingHorizontal: 14,
-        backgroundColor: 'white',
-        color: '#0f172a',
+        backgroundColor: colors.input,
+        color: colors.text,
     },
     primaryButton: {
-        backgroundColor: '#065F46',
+        backgroundColor: '#0ea5e9',
         paddingHorizontal: 16,
         paddingVertical: 11,
         borderRadius: 14,
     },
     secondaryButton: {
-        backgroundColor: '#e2e8f0',
+        backgroundColor: colors.surfaceMuted,
         paddingHorizontal: 16,
         paddingVertical: 11,
         borderRadius: 14,
@@ -1327,26 +1542,30 @@ const styles = StyleSheet.create({
         paddingVertical: 11,
         borderRadius: 14,
     },
-    showOnMapButton: {
-        alignSelf: 'flex-start',
-        backgroundColor: '#2563eb',
-        paddingHorizontal: 14,
-        paddingVertical: 9,
-        borderRadius: 999,
+    headerIconRow: {
         flexDirection: 'row',
         alignItems: 'center',
-        gap: 6,
+        gap: 8,
     },
-    showOnMapButtonText: {
-        color: 'white',
-        fontWeight: '700',
+    folderActionButton: {
+        width: 42,
+        height: 42,
+        borderRadius: 21,
+        backgroundColor: '#2563eb',
+        alignItems: 'center',
+        justifyContent: 'center',
+        shadowColor: '#0f172a',
+        shadowOpacity: 0.14,
+        shadowRadius: 8,
+        shadowOffset: { width: 0, height: 3 },
+        elevation: 3,
     },
     countrySubFoldersSection: {
         paddingHorizontal: 16,
         paddingBottom: 12,
     },
     countrySubFoldersTitle: {
-        color: '#0f172a',
+        color: colors.text,
         fontSize: 15,
         fontWeight: '800',
         marginBottom: 10,
@@ -1366,7 +1585,7 @@ const styles = StyleSheet.create({
     },
     countrySubFolderCover: {
         ...StyleSheet.absoluteFillObject,
-        backgroundColor: '#e2e8f0',
+        backgroundColor: colors.surfaceMuted,
     },
     countrySubFolderFallback: {
         ...StyleSheet.absoluteFillObject,
@@ -1392,7 +1611,7 @@ const styles = StyleSheet.create({
         textShadowRadius: 4,
     },
     emptyCard: {
-        backgroundColor: 'white',
+        backgroundColor: colors.surface,
         borderRadius: 20,
         padding: 24,
         alignItems: 'center',
@@ -1400,7 +1619,7 @@ const styles = StyleSheet.create({
     emptyFolderCard: {
         marginTop: 60,
         marginHorizontal: 12,
-        backgroundColor: 'white',
+        backgroundColor: colors.surface,
         borderRadius: 20,
         padding: 24,
         alignItems: 'center',
@@ -1411,8 +1630,8 @@ const styles = StyleSheet.create({
         borderRadius: 22,
         minHeight: 170,
         overflow: 'hidden',
-        backgroundColor: 'white',
-        shadowColor: '#000',
+        backgroundColor: colors.surface,
+        shadowColor: colors.shadow,
         shadowOpacity: 0.08,
         shadowRadius: 12,
         elevation: 3,
@@ -1507,7 +1726,7 @@ const styles = StyleSheet.create({
         width: 52,
         height: 52,
         borderRadius: 16,
-        backgroundColor: '#dbeafe',
+        backgroundColor: colors.accentSoft,
         alignItems: 'center',
         justifyContent: 'center',
     },
@@ -1515,14 +1734,14 @@ const styles = StyleSheet.create({
         marginTop: 16,
         fontSize: 17,
         fontWeight: '700',
-        color: '#0f172a',
+        color: colors.text,
     },
     customFolderCount: {
         marginTop: 6,
-        color: '#64748b',
+        color: colors.textMuted,
     },
     customFolderLabel: {
-        color: '#94a3b8',
+        color: colors.textMuted,
         fontSize: 12,
     },
     sharedLibraryLabelRow: {
@@ -1539,10 +1758,10 @@ const styles = StyleSheet.create({
     },
     panelCard: {
         marginTop: 14,
-        backgroundColor: 'white',
+        backgroundColor: colors.surface,
         borderRadius: 20,
         padding: 14,
-        shadowColor: '#000',
+        shadowColor: colors.shadow,
         shadowOpacity: 0.06,
         shadowRadius: 10,
         elevation: 2,
@@ -1550,7 +1769,7 @@ const styles = StyleSheet.create({
     addMemosTabs: {
         flexDirection: 'row',
         marginTop: 14,
-        backgroundColor: '#f1f5f9',
+        backgroundColor: colors.surfaceMuted,
         borderRadius: 16,
         padding: 4,
         gap: 4,
@@ -1562,19 +1781,19 @@ const styles = StyleSheet.create({
         alignItems: 'center',
     },
     addMemosTabActive: {
-        backgroundColor: 'white',
-        shadowColor: '#0f172a',
+        backgroundColor: colors.surfaceElevated,
+        shadowColor: colors.shadow,
         shadowOpacity: 0.08,
         shadowRadius: 6,
         elevation: 1,
     },
     addMemosTabText: {
-        color: '#64748b',
+        color: colors.textMuted,
         fontSize: 13,
         fontWeight: '700',
     },
     addMemosTabTextActive: {
-        color: '#065F46',
+        color: '#0369a1',
     },
     libraryPlaceSearchContainer: {
         marginTop: 12,
@@ -1582,9 +1801,9 @@ const styles = StyleSheet.create({
     libraryPlaceSearchInputRow: {
         minHeight: 48,
         borderWidth: 1,
-        borderColor: '#cbd5e1',
+        borderColor: colors.border,
         borderRadius: 16,
-        backgroundColor: '#f8fafc',
+        backgroundColor: colors.input,
         paddingHorizontal: 12,
         flexDirection: 'row',
         alignItems: 'center',
@@ -1592,35 +1811,35 @@ const styles = StyleSheet.create({
     },
     libraryPlaceSearchInput: {
         flex: 1,
-        color: '#0f172a',
+        color: colors.text,
         fontWeight: '600',
         paddingVertical: 10,
     },
     libraryPlaceSearchHint: {
-        color: '#64748b',
+        color: colors.textMuted,
         marginTop: 12,
         lineHeight: 20,
     },
     libraryPlaceResults: {
         marginTop: 10,
         borderWidth: 1,
-        borderColor: '#e2e8f0',
+        borderColor: colors.border,
         borderRadius: 16,
         overflow: 'hidden',
-        backgroundColor: 'white',
+        backgroundColor: colors.surface,
     },
     libraryPlaceResultItem: {
         paddingHorizontal: 12,
         paddingVertical: 12,
         borderBottomWidth: 1,
-        borderBottomColor: '#e2e8f0',
+        borderBottomColor: colors.border,
     },
     libraryPlaceResultTitle: {
-        color: '#0f172a',
+        color: colors.text,
         fontWeight: '700',
     },
     libraryPlaceResultSubtitle: {
-        color: '#64748b',
+        color: colors.textMuted,
         marginTop: 3,
         fontSize: 12,
     },
@@ -1628,7 +1847,7 @@ const styles = StyleSheet.create({
         marginTop: 12,
         padding: 12,
         borderRadius: 16,
-        backgroundColor: '#f8fafc',
+        backgroundColor: colors.surfaceMuted,
         borderWidth: 1,
         borderColor: '#dbeafe',
         flexDirection: 'row',
@@ -1636,16 +1855,16 @@ const styles = StyleSheet.create({
         gap: 12,
     },
     selectedLibraryPlaceTitle: {
-        color: '#0f172a',
+        color: colors.text,
         fontWeight: '800',
         fontSize: 15,
     },
     selectedLibraryPlaceSubtitle: {
-        color: '#64748b',
+        color: colors.textMuted,
         marginTop: 4,
     },
     addPlaceToLibraryButton: {
-        backgroundColor: '#065F46',
+        backgroundColor: '#0ea5e9',
         borderRadius: 14,
         paddingHorizontal: 16,
         paddingVertical: 10,
@@ -1659,25 +1878,74 @@ const styles = StyleSheet.create({
         paddingVertical: 10,
         borderRadius: 14,
     },
+    memoGridAmbientShadow: {
+        shadowColor: '#0f172a',
+        shadowOpacity: 0.12,
+        shadowRadius: 18,
+        shadowOffset: { width: 0, height: 8 },
+        borderRadius: 7,
+    },
     memoGridItem: {
-        backgroundColor: 'white',
-        padding: 4,
-        paddingBottom: 12,
-        shadowColor: '#000',
-        shadowOpacity: 0.1,
-        elevation: 3,
+        backgroundColor: '#fffef9',
+        padding: 5,
+        paddingBottom: 10,
+        shadowColor: '#0f172a',
+        shadowOpacity: 0.3,
+        shadowRadius: 5,
+        shadowOffset: { width: 2, height: 5 },
+        elevation: 8,
+        borderRadius: 7,
+        borderWidth: 0.5,
+        borderColor: 'rgba(0, 0, 0, 0.08)',
+    },
+    memoGridImageFrame: {
+        overflow: 'hidden',
+        borderRadius: 4,
     },
     memoGridTitle: {
-        fontSize: 10,
-        color: '#0f172a',
+        fontSize: 11,
+        color: '#374151',
         textAlign: 'center',
-        fontWeight: '700',
-        marginTop: 6,
-        paddingHorizontal: 4,
+        fontWeight: '600',
+        fontStyle: 'italic',
+        marginTop: 8,
+        paddingHorizontal: 3,
+        letterSpacing: 0.1,
     },
-    memoGridDate: {
-        fontSize: 8,
-        color: '#c2410c',
+    panelInlineTitle: {
+        fontSize: 16,
+        fontWeight: '700',
+        color: colors.text,
+    },
+    panelInlineText: {
+        color: colors.textMuted,
+        marginTop: 4,
+        lineHeight: 20,
+    },
+    secondaryButtonText: {
+        color: colors.textSecondary,
+        fontWeight: '700',
+    },
+    emptyInlineTitle: {
+        marginTop: 12,
+        fontSize: 16,
+        fontWeight: '600',
+        color: colors.text,
         textAlign: 'center',
+    },
+    emptyInlineText: {
+        marginTop: 6,
+        color: colors.textMuted,
+        textAlign: 'center',
+    },
+    savedMemoTitle: {
+        fontSize: 15,
+        fontWeight: '700',
+        color: colors.text,
+    },
+    savedMemoDescription: {
+        fontSize: 13,
+        color: colors.textSecondary,
+        marginTop: 2,
     },
 });

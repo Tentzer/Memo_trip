@@ -56,8 +56,8 @@ export interface MarketplaceResult<T> {
 
 function mapMarketLibrary(row: any): MarketLibrary {
     return {
-        id: row.id.toString(),
-        sourceLibraryId: row.source_library_id.toString(),
+        id: String(row.id),
+        sourceLibraryId: row.source_library_id != null ? String(row.source_library_id) : '',
         authorId: row.author_id,
         name: row.name,
         description: row.description ?? undefined,
@@ -72,9 +72,9 @@ function mapMarketLibrary(row: any): MarketLibrary {
 
 function mapMarketPhoto(row: any): MarketPhoto {
     return {
-        id: row.id.toString(),
-        marketLibraryId: row.market_library_id.toString(),
-        sourceMemoryId: row.source_memory_id.toString(),
+        id: String(row.id),
+        marketLibraryId: String(row.market_library_id),
+        sourceMemoryId: row.source_memory_id != null ? String(row.source_memory_id) : '',
         imageUrl: row.image_url,
         latitude: row.latitude,
         longitude: row.longitude,
@@ -209,10 +209,116 @@ export async function publishLibraryToMarket({userId,library,memories,descriptio
     return { data: mapMarketLibrary(insertedLibrary), error: null };
 }
 
+async function listActiveMarketLibraryDownloadIds(): Promise<MarketplaceResult<string[]>> {
+    const { data, error } = await supabase
+        .from('market_library_downloads')
+        .select('market_library_id, downloaded_library_id');
+
+    if (error) {
+        return { data: null, error: error.message };
+    }
+
+    const rows = (data ?? []).filter(
+        (row) => row.market_library_id != null && row.downloaded_library_id != null,
+    );
+
+    if (rows.length === 0) {
+        return { data: [], error: null };
+    }
+
+    const copiedLibraryIds = rows.map(row => String(row.downloaded_library_id));
+    const { data: existingLibraries, error: librariesError } = await supabase
+        .from('libraries')
+        .select('id')
+        .in('id', copiedLibraryIds);
+
+    if (librariesError) {
+        return { data: null, error: librariesError.message };
+    }
+
+    const activeLibraryIds = new Set(
+        (existingLibraries ?? []).map(row => String(row.id)),
+    );
+
+    return {
+        data: rows
+            .filter(row => activeLibraryIds.has(String(row.downloaded_library_id)))
+            .map(row => String(row.market_library_id)),
+        error: null,
+    };
+}
+
+/** Market listings the user still has a copied library for (blocks re-download in UI). */
+export async function listDownloadedMarketLibraryIds(): Promise<MarketplaceResult<string[]>> {
+    return listActiveMarketLibraryDownloadIds();
+}
+
+/**
+ * Removes stale download rows (including null downloaded_library_id) so the
+ * download_market_library RPC can insert again after the user deleted their copy.
+ */
+export async function clearMarketLibraryDownloadRecords(
+    marketLibraryId: string,
+): Promise<MarketplaceResult<void>> {
+    const { error } = await supabase
+        .from('market_library_downloads')
+        .delete()
+        .eq('market_library_id', marketLibraryId);
+
+    if (error) {
+        return { data: null, error: error.message };
+    }
+
+    return { data: undefined, error: null };
+}
+
+/** Clears all download history for a listing when the user deletes their copied library. */
+export async function revokeMarketLibraryDownload(
+    downloadedLibraryId: string,
+): Promise<MarketplaceResult<void>> {
+    const { data: row, error: selectError } = await supabase
+        .from('market_library_downloads')
+        .select('market_library_id')
+        .eq('downloaded_library_id', downloadedLibraryId)
+        .not('market_library_id', 'is', null)
+        .limit(1)
+        .maybeSingle();
+
+    if (selectError) {
+        return { data: null, error: selectError.message };
+    }
+
+    if (!row?.market_library_id) {
+        const { error } = await supabase
+            .from('market_library_downloads')
+            .delete()
+            .eq('downloaded_library_id', downloadedLibraryId);
+
+        if (error) {
+            return { data: null, error: error.message };
+        }
+        return { data: undefined, error: null };
+    }
+
+    return clearMarketLibraryDownloadRecords(String(row.market_library_id));
+}
+
+const ALREADY_DOWNLOADED_MESSAGE = 'You have already downloaded this marketplace library.';
+
 export async function downloadMarketLibrary(marketLibraryId: string): Promise<MarketplaceResult<string>> {
-    const { data, error } = await supabase.rpc('download_market_library', {
+    const runDownload = async () => supabase.rpc('download_market_library', {
         p_market_library_id: marketLibraryId,
     });
+
+    let { data, error } = await runDownload();
+
+    if (error?.message?.includes(ALREADY_DOWNLOADED_MESSAGE)) {
+        const cleared = await clearMarketLibraryDownloadRecords(marketLibraryId);
+        if (cleared.error) {
+            return { data: null, error: cleared.error };
+        }
+        ({ data, error } = await runDownload());
+    }
 
     if (error) {
         return { data: null, error: error.message };
@@ -222,22 +328,7 @@ export async function downloadMarketLibrary(marketLibraryId: string): Promise<Ma
         return { data: null, error: 'Download did not return a library id.' };
     }
 
-    return { data: data?.toString() ?? null, error: null };
-}
-
-export async function listDownloadedMarketLibraryIds(): Promise<MarketplaceResult<string[]>> {
-    const { data, error } = await supabase
-        .from('market_library_downloads')
-        .select('market_library_id');
-
-    if (error) {
-        return { data: null, error: error.message };
-    }
-
-    return {
-        data: (data ?? []).map(row => row.market_library_id.toString()),
-        error: null,
-    };
+    return { data: String(data), error: null };
 }
 
 export async function excludeLibraryMemosFromCountryFolders(

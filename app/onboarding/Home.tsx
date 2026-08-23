@@ -1,30 +1,42 @@
 import InvitesModal from '@/components/InvitesModal';
 import LibraryModal from '@/components/LibraryModal';
+import MapMemoryMarker from '@/components/MapMemoryMarker';
 import MarketPlaceModal from '@/components/MarketPlaceModal';
 import MemoActionsSheet from '@/components/MemoActionsSheet';
 import MemoInfoModal from '@/components/MemoInfoModal';
 import PlaceDescriptionModal from '@/components/PlaceDescriptionModal';
-import SearchBar from '@/components/SearchBar';
+import SearchBar, { SEARCH_BAR_ROW_HEIGHT_PX } from '@/components/SearchBar';
 import SettingsSheet, { type SettingsSheetRef } from '@/components/SettingsSheet';
 import ShareMemoryModal from '@/components/ShareMemoryModal';
 import { darkMapStyle } from '@/constants/darkMapStyle';
 import { useAuth } from '@/context/AuthContext';
 import { type Memory, useMemories } from '@/context/MemoryContext';
+import { useAppTheme } from '@/context/ThemeContext';
 import { useMapLogic } from '@/hooks/useMapLogic';
+import { useMapMemoryMarkerDisplay } from '@/hooks/useMapMemoryMarkerDisplay';
+import { getCountryNameFromCoords } from '@/lib/geocoding';
+import { alertRequireSignIn } from '@/lib/requireSignInAlert';
 import { Ionicons } from '@expo/vector-icons';
 import { Image as ExpoImage } from 'expo-image';
-import { router, useLocalSearchParams } from 'expo-router';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
     ActivityIndicator,
     Alert,
     Keyboard,
+    ScrollView,
     StyleSheet,
     Text,
     TouchableOpacity,
     View,
 } from 'react-native';
+import Animated, {
+    useAnimatedStyle,
+    useSharedValue,
+    withTiming,
+} from 'react-native-reanimated';
 import MapView, { Marker, Polyline, PROVIDER_GOOGLE } from 'react-native-maps';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 function isValidMapCoordinate(lat: number, lng: number): boolean {
     return (
@@ -35,59 +47,29 @@ function isValidMapCoordinate(lat: number, lng: number): boolean {
     );
 }
 
-type MapMemoryMarkerProps = {
-    memory: Memory;
-    variant: 'owned' | 'shared';
-    index: number;
-    onMarkerPress: (memory: Memory) => void;
+const UNKNOWN_LOCATION = 'Unknown Location';
+
+type MapLibraryFilter =
+    | { mode: 'country'; id: string; name: string }
+    | { mode: 'custom'; id: string; name: string }
+    | { mode: 'custom-multi'; ids: string[]; names: string[]; country: string };
+
+type RelatedLibraryFilterOption = {
+    id: string;
+    name: string;
+    memoCount: number;
+    coverImageUrl?: string | null;
 };
 
-function MapMemoryMarker({ memory, variant, index, onMarkerPress }: MapMemoryMarkerProps) {
-    const [tracksViewChanges, setTracksViewChanges] = useState(true);
-    const accentColor = variant === 'owned' ? '#1d4ed8' : '#2563eb';
-
-    return (
-        <Marker
-            coordinate={{
-                latitude: memory.latitude,
-                longitude: memory.longitude,
-            }}
-            onPress={() => onMarkerPress(memory)}
-            tracksViewChanges={tracksViewChanges}
-        >
-            <View style={styles.markerPinWrapper}>
-                <View
-                    style={[
-                        styles.markerContainer,
-                        styles.markerAvatarOuter,
-                        {
-                            borderColor: variant === 'shared' ? '#7c3aed' : 'transparent',
-                            borderWidth: variant === 'shared' ? 3 : 0,
-                            backgroundColor: variant === 'shared' ? 'white' : 'transparent',
-                            width: variant === 'shared' ? 68 : 58,
-                            height: variant === 'shared' ? 68 : 58,
-                            borderRadius: variant === 'shared' ? 34 : 29,
-                        },
-                    ]}
-                >
-                    <View style={[styles.markerAccentRing, { borderColor: accentColor }]}>
-                        <ExpoImage
-                            source={{ uri: memory.uri }}
-                            style={styles.markerAvatarImage}
-                            contentFit="cover"
-                            cachePolicy="memory-disk"
-                            onLoad={() => setTracksViewChanges(false)}
-                            onError={() => setTracksViewChanges(false)}
-                        />
-                    </View>
-                </View>
-                <View style={[styles.markerStem, { backgroundColor: accentColor }]} />
-            </View>
-        </Marker>
-    );
-}
-
 export default function MapScreen() {
+    const insets = useSafeAreaInsets();
+    const router = useRouter();
+    const auth = useAuth();
+    const { isDarkMode, setIsDarkMode, theme } = useAppTheme();
+    /** Match `components/SearchBar.tsx` top offset below safe area. */
+    const mapChromeTop = insets.top + 16;
+    const menuBelowSearchGap = 10;
+
     const {
         memories,
         sharedLibraryMemories,
@@ -104,19 +86,34 @@ export default function MapScreen() {
         updateMemoryInfo,
         reloadMemories,
     } = useMemories();
-    const auth = useAuth();
+
+    const settingsSheetRef = useRef<SettingsSheetRef>(null);
+    const [marketplaceVisible, setMarketplaceVisible] = useState(false);
+    const [invitesVisible, setInvitesVisible] = useState(false);
 
     const [isInfoModalVisible, setIsInfoModalVisible] = useState(false);
     const [selectedMemoryForInfo, setSelectedMemoryForInfo] = useState<Memory | null>(null);
     const [selectedMemoryForActions, setSelectedMemoryForActions] = useState<Memory | null>(null);
-    const [activeMapLibraryFilter, setActiveMapLibraryFilter] = useState<{
-        id: string;
-        type: 'country' | 'custom';
-        name: string;
-    } | null>(null);
+    const [activeMapLibraryFilter, setActiveMapLibraryFilter] = useState<MapLibraryFilter | null>(null);
+    const [isLibraryFilterVisible, setIsLibraryFilterVisible] = useState(false);
+    const [selectedFilterLibraryIds, setSelectedFilterLibraryIds] = useState<string[]>([]);
+    const [currentGpsCountry, setCurrentGpsCountry] = useState<string | null>(null);
+    const [isFilterCountryLoading, setIsFilterCountryLoading] = useState(false);
+    // Google Maps (PROVIDER_GOOGLE) cannot correctly snapshot or position
+    // <Marker> children that mount before its native surface finishes
+    // initializing. Mounting custom markers pre-`onMapReady` is the documented
+    // root cause of clipped bitmaps and markers placed at wrong screen
+    // coordinates. We gate marker rendering on this flag so every marker goes
+    // through the same correct path the hide/show toggle hits.
+    const [isMapReady, setIsMapReady] = useState(false);
     const [markerRenderVersion, setMarkerRenderVersion] = useState(0);
-    const [isInvitesVisible, setIsInvitesVisible] = useState(false);
-    const [isMarketplaceVisible, setIsMarketplaceVisible] = useState(false);
+    // Tracks the last folder-filter params we applied so re-renders don't
+    // re-apply a filter the user has already manually cleared.
+    const processedFolderFilterRef = useRef<string | null>(null);
+    const filterCountryLookupRef = useRef<string | null>(null);
+
+    const mapCurtainOpacity = useSharedValue(1);
+    const mapCurtainStyle = useAnimatedStyle(() => ({ opacity: mapCurtainOpacity.value }));
 
     const openMemoInfo = useCallback((memory: Memory) => {
         setSelectedMemoryForInfo(memory);
@@ -143,34 +140,56 @@ export default function MapScreen() {
     }, [selectedMemoryForInfo, updateMemoryInfo, closeMemoInfo]);
 
     const {
-        mapRef, location, loading, searchQuery, searchResults, isDarkMode,
+        mapRef, location, loading: mapLocationLoading, searchQuery, searchResults,
         destinationLatitude, destinationLongitude, routeCoordinates,
         showRoute, showSearchBar, mapMoved, userChoseAddress, routeDistance,
-        showMemories, isGalleryVisible, isShareMemoryVisible, shareEmail, memoryToShare,
+        showMemories, isGalleryVisible, isCountryLibraryVisible, isShareMemoryVisible, shareRecipient, memoryToShare,
         isAddingPlace, isNoPhotoDescriptionVisible, missingPhotoDescription,
-        setSearchQuery, setMapMoved, fetchPlaces, handleSelectPlace, setShareEmail,
+        setShowMemories, setSearchQuery, setMapMoved, fetchPlaces, handleSelectPlace, setShareRecipient,
         getPlaceRoute, openDrivingInWaze, handleMarkerPress, returnToStartingPoint,
-        setIsShareMemoryVisible, setIsDarkMode, setMemoryToShare,
+        setIsShareMemoryVisible, setMemoryToShare,
         setShowRoute, setShowSearchBar, setUserChoseAddress, setRouteDistance,
-        setDestinationLongitude, setDestinationLatitude, setShowMemories, setIsGalleryVisible,
+        setDestinationLongitude, setDestinationLatitude, setIsGalleryVisible, setIsCountryLibraryVisible,
         jumpToLocation, handleClearSearch, addSelectedPlaceAsMemory,
         setMissingPhotoDescription, closeNoPhotoDescriptionPrompt,
         saveNoPhotoPlaceWithoutDescription, saveNoPhotoPlaceWithDescription,
     } = useMapLogic(addPlaceMemory, openMemoActions);
 
-    const settingsSheetRef = useRef<SettingsSheetRef>(null);
+    const handleOpenSettings = useCallback(() => {
+        Keyboard.dismiss();
+        setIsLibraryFilterVisible(false);
+        settingsSheetRef.current?.open();
+    }, []);
+
+    const navigateInfo = useCallback(() => router.push('/onboarding/info'), [router]);
+
+    const menuButtonTop = showSearchBar
+        ? mapChromeTop + SEARCH_BAR_ROW_HEIGHT_PX + menuBelowSearchGap
+        : mapChromeTop;
 
     const clearMapLibraryFilter = useCallback(() => {
         setActiveMapLibraryFilter(null);
+        setSelectedFilterLibraryIds([]);
+        setIsLibraryFilterVisible(false);
         setMarkerRenderVersion((prev) => prev + 1);
     }, []);
 
+    const handleShowMemoriesChange = useCallback((next: boolean) => {
+        setShowMemories(next);
+        if (next && isMapReady) {
+            setMarkerRenderVersion((prev) => prev + 1);
+        }
+    }, [isMapReady, setShowMemories]);
+
     const handleShowFolderOnMap = useCallback((folderId: string, folderType: 'country' | 'custom', folderName: string) => {
-        setActiveMapLibraryFilter({ id: folderId, type: folderType, name: folderName });
-        setMarkerRenderVersion((prev) => prev + 1);
+        setActiveMapLibraryFilter({ id: folderId, mode: folderType, name: folderName });
+        setSelectedFilterLibraryIds(folderType === 'custom' ? [folderId] : []);
+        setIsLibraryFilterVisible(false);
         setShowMemories(true);
         setIsGalleryVisible(false);
-    }, [setShowMemories, setIsGalleryVisible]);
+        setIsCountryLibraryVisible(false);
+        setMarkerRenderVersion((prev) => prev + 1);
+    }, [setShowMemories, setIsGalleryVisible, setIsCountryLibraryVisible]);
 
     const handleOpenInfoFromActions = useCallback(() => {
         if (!selectedMemoryForActions) return;
@@ -184,7 +203,7 @@ export default function MapScreen() {
         const targetMemory = selectedMemoryForActions;
         closeMemoActions();
         setShowSearchBar(false);
-        await returnToStartingPoint();
+        await returnToStartingPoint({ forceRefresh: true });
         const ok = await getPlaceRoute(targetMemory.latitude, targetMemory.longitude);
         if (ok) {
             setShowRoute(true);
@@ -202,11 +221,15 @@ export default function MapScreen() {
 
     const handleShareMemoFromActions = useCallback(() => {
         if (!selectedMemoryForActions || selectedMemoryForActions.isShared) return;
+        if (!auth.user) {
+            alertRequireSignIn('Sign in to share this memo.');
+            return;
+        }
         setMemoryToShare(selectedMemoryForActions);
-        setShareEmail('');
+        setShareRecipient('');
         closeMemoActions();
         setIsShareMemoryVisible(true);
-    }, [closeMemoActions, selectedMemoryForActions, setIsShareMemoryVisible, setMemoryToShare, setShareEmail]);
+    }, [auth.user, closeMemoActions, selectedMemoryForActions, setIsShareMemoryVisible, setMemoryToShare, setShareRecipient]);
 
     const handleDeleteMemoFromActions = useCallback(() => {
         if (!selectedMemoryForActions || selectedMemoryForActions.isShared) return;
@@ -236,38 +259,168 @@ export default function MapScreen() {
         );
     }, [memories, sharedLibraryMemories, destinationLatitude, destinationLongitude, userChoseAddress]);
 
+    useEffect(() => {
+        if (!location) return;
+
+        const { latitude, longitude } = location.coords;
+        const lookupKey = `${latitude.toFixed(3)},${longitude.toFixed(3)}`;
+        if (filterCountryLookupRef.current === lookupKey) return;
+
+        filterCountryLookupRef.current = lookupKey;
+        let isMounted = true;
+        setIsFilterCountryLoading(true);
+
+        getCountryNameFromCoords(latitude, longitude)
+            .then((country) => {
+                if (isMounted) {
+                    setCurrentGpsCountry(country);
+                }
+            })
+            .finally(() => {
+                if (isMounted) {
+                    setIsFilterCountryLoading(false);
+                }
+            });
+
+        return () => {
+            isMounted = false;
+        };
+    }, [location]);
+
+    const relatedLibraryFilterOptions = useMemo<RelatedLibraryFilterOption[]>(() => {
+        if (!currentGpsCountry || currentGpsCountry === UNKNOWN_LOCATION) return [];
+
+        return customFolders
+            .map((folder) => {
+                const memoCount = [...memories, ...sharedLibraryMemories].filter((memory) =>
+                    !memory.deletedAt &&
+                    (memory.country || UNKNOWN_LOCATION) === currentGpsCountry &&
+                    (memory.customFolderIds ?? []).includes(folder.id)
+                ).length;
+
+                return {
+                    id: folder.id,
+                    name: folder.name,
+                    memoCount,
+                    coverImageUrl: folder.coverImageUrl,
+                };
+            })
+            .filter((folder) => folder.memoCount > 0)
+            .sort((a, b) => a.name.localeCompare(b.name));
+    }, [customFolders, currentGpsCountry, memories, sharedLibraryMemories]);
+
+    const toggleFilterLibrary = useCallback((folderId: string) => {
+        setSelectedFilterLibraryIds((prev) =>
+            prev.includes(folderId)
+                ? prev.filter(id => id !== folderId)
+                : [...prev, folderId]
+        );
+    }, []);
+
+    const applyLibraryFilter = useCallback(() => {
+        if (!currentGpsCountry || selectedFilterLibraryIds.length === 0) {
+            clearMapLibraryFilter();
+            return;
+        }
+
+        const selectedNames = relatedLibraryFilterOptions
+            .filter(option => selectedFilterLibraryIds.includes(option.id))
+            .map(option => option.name);
+
+        setActiveMapLibraryFilter({
+            mode: 'custom-multi',
+            ids: selectedFilterLibraryIds,
+            names: selectedNames,
+            country: currentGpsCountry,
+        });
+        setShowMemories(true);
+        setIsLibraryFilterVisible(false);
+    }, [clearMapLibraryFilter, currentGpsCountry, relatedLibraryFilterOptions, selectedFilterLibraryIds, setShowMemories]);
+
+    const toggleLibraryFilterPopover = useCallback(() => {
+        Keyboard.dismiss();
+        setSelectedFilterLibraryIds(() => {
+            if (activeMapLibraryFilter?.mode === 'custom-multi') {
+                return activeMapLibraryFilter.ids;
+            }
+            if (activeMapLibraryFilter?.mode === 'custom') {
+                return [activeMapLibraryFilter.id];
+            }
+            return [];
+        });
+        setIsLibraryFilterVisible(prev => !prev);
+    }, [activeMapLibraryFilter]);
+
     const visibleOwnedMemories = useMemo(() => {
         if (!activeMapLibraryFilter) return memories.filter(memory => !memory.deletedAt);
-        if (activeMapLibraryFilter.type === 'custom') {
+        if (activeMapLibraryFilter.mode === 'custom') {
             return memories.filter(memory =>
+                !memory.deletedAt &&
                 (memory.customFolderIds ?? []).includes(activeMapLibraryFilter.id)
+            );
+        }
+        if (activeMapLibraryFilter.mode === 'custom-multi') {
+            return memories.filter(memory =>
+                !memory.deletedAt &&
+                (memory.country || UNKNOWN_LOCATION) === activeMapLibraryFilter.country &&
+                (memory.customFolderIds ?? []).some(folderId => activeMapLibraryFilter.ids.includes(folderId))
             );
         }
         return memories.filter(memory =>
             !memory.deletedAt &&
             !memory.excludeFromCountryFolder &&
-            (memory.country || 'Unknown Location') === activeMapLibraryFilter.name
+            (memory.country || UNKNOWN_LOCATION) === activeMapLibraryFilter.name
         );
     }, [memories, activeMapLibraryFilter]);
 
     const visibleSharedMemories = useMemo(() => {
         if (!activeMapLibraryFilter) return sharedLibraryMemories;
-        if (activeMapLibraryFilter.type === 'custom') {
+        if (activeMapLibraryFilter.mode === 'custom') {
             return sharedLibraryMemories.filter(memory =>
                 (memory.customFolderIds ?? []).includes(activeMapLibraryFilter.id)
             );
         }
+        if (activeMapLibraryFilter.mode === 'custom-multi') {
+            return sharedLibraryMemories.filter(memory =>
+                !memory.deletedAt &&
+                (memory.country || UNKNOWN_LOCATION) === activeMapLibraryFilter.country &&
+                (memory.customFolderIds ?? []).some(folderId => activeMapLibraryFilter.ids.includes(folderId))
+            );
+        }
         return sharedLibraryMemories.filter(memory =>
             !memory.excludeFromCountryFolder &&
-            (memory.country || 'Unknown Location') === activeMapLibraryFilter.name
+            (memory.country || UNKNOWN_LOCATION) === activeMapLibraryFilter.name
         );
     }, [sharedLibraryMemories, activeMapLibraryFilter]);
 
-    useEffect(() => {
-        returnToStartingPoint();
-    }, [returnToStartingPoint]);
+    const mapOwnedMemories = useMemo(
+        () => visibleOwnedMemories.filter((m) => isValidMapCoordinate(m.latitude, m.longitude)),
+        [visibleOwnedMemories],
+    );
+    const mapSharedMemories = useMemo(
+        () => visibleSharedMemories.filter((m) => isValidMapCoordinate(m.latitude, m.longitude)),
+        [visibleSharedMemories],
+    );
 
-    const { focusLat, focusLng } = useLocalSearchParams<{ focusLat?: string; focusLng?: string }>();
+    const mapMarkersToRender = useMapMemoryMarkerDisplay(mapOwnedMemories, mapSharedMemories, {
+        mapReady: isMapReady,
+        showMemories,
+    });
+
+    const initialMapCenterDoneRef = useRef(false);
+    useEffect(() => {
+        if (!location || !isMapReady || initialMapCenterDoneRef.current) return;
+        initialMapCenterDoneRef.current = true;
+        void returnToStartingPoint({ forceRefresh: false });
+    }, [location, isMapReady, returnToStartingPoint]);
+
+    const { focusLat, focusLng, folderId, folderType, folderName } = useLocalSearchParams<{
+        focusLat?: string;
+        focusLng?: string;
+        folderId?: string;
+        folderType?: string;
+        folderName?: string;
+    }>();
 
     useEffect(() => {
         if (!focusLat || !focusLng) return;
@@ -278,25 +431,155 @@ export default function MapScreen() {
         }
     }, [focusLat, focusLng, jumpToLocation]);
 
-    if (loading) {
-        return (
-            <View className="flex-1 justify-center items-center bg-slate-50">
-                <ActivityIndicator size="large" color="#3B82F6" />
-            </View>
-        );
-    }
+    useEffect(() => {
+        if (!folderId || !folderType || !folderName) return;
+        const paramKey = `${folderId}:${folderType}:${folderName}`;
+        if (processedFolderFilterRef.current === paramKey) return;
+        processedFolderFilterRef.current = paramKey;
+        if (folderType !== 'country' && folderType !== 'custom') return;
+        handleShowFolderOnMap(folderId, folderType, folderName);
+    }, [folderId, folderType, folderName, handleShowFolderOnMap]);
 
     return (
-        <View className="flex-1 items-center bg-slate-50">
+        <View style={[styles.screen, { backgroundColor: theme.colors.background }]}>
             <TouchableOpacity
-                onPress={() => {
-                    Keyboard.dismiss();
-                    settingsSheetRef.current?.open();
-                }}
-                style={styles.menuButton}
+                onPress={handleOpenSettings}
+                style={[
+                    styles.menuButton,
+                    {
+                        top: menuButtonTop,
+                        backgroundColor: theme.colors.surface,
+                        borderColor: theme.colors.border,
+                    },
+                ]}
+                accessibilityRole="button"
+                accessibilityLabel="Settings"
             >
-                <Ionicons name="menu" size={30} color="#3B82F6" />
+                <Ionicons name="menu-outline" size={26} color={theme.colors.textSecondary} />
             </TouchableOpacity>
+
+            <TouchableOpacity
+                onPress={toggleLibraryFilterPopover}
+                style={[
+                    styles.filterButton,
+                    {
+                        top: menuButtonTop,
+                        backgroundColor: theme.colors.surface,
+                        borderColor: activeMapLibraryFilter?.mode === 'custom-multi' ? theme.colors.accent : theme.colors.border,
+                    },
+                ]}
+            >
+                <Ionicons
+                    name="funnel-outline"
+                    size={26}
+                    color={activeMapLibraryFilter?.mode === 'custom-multi' ? theme.colors.accent : theme.colors.textSecondary}
+                />
+            </TouchableOpacity>
+
+
+
+            {isLibraryFilterVisible ? (
+                <View
+                    style={[
+                        styles.libraryFilterPopover,
+                        {
+                            top: menuButtonTop + 54,
+                            backgroundColor: theme.colors.surface,
+                            borderColor: theme.colors.border,
+                        },
+                    ]}
+                >
+                    <View style={styles.libraryFilterHeader}>
+                        <View style={{ flex: 1 }}>
+                            <Text style={[styles.libraryFilterTitle, { color: theme.colors.text }]}>
+                                {currentGpsCountry && currentGpsCountry !== UNKNOWN_LOCATION
+                                    ? currentGpsCountry
+                                    : 'Nearby'}
+                            </Text>
+                        </View>
+                        <TouchableOpacity onPress={() => setIsLibraryFilterVisible(false)} hitSlop={8}>
+                            <Ionicons name="close" size={20} color={theme.colors.textMuted} />
+                        </TouchableOpacity>
+                    </View>
+
+                    {isFilterCountryLoading ? (
+                        <View style={styles.libraryFilterEmpty}>
+                            <ActivityIndicator size="small" color={theme.colors.accent} />
+                            <Text style={[styles.libraryFilterEmptyText, { color: theme.colors.textMuted }]}>
+                                Finding your current country...
+                            </Text>
+                        </View>
+                    ) : relatedLibraryFilterOptions.length === 0 ? (
+                        <View style={styles.libraryFilterEmpty}>
+                            <Ionicons name="folder-open-outline" size={28} color={theme.colors.textMuted} />
+                            <Text style={[styles.libraryFilterEmptyText, { color: theme.colors.textMuted }]}>
+                                No related libraries found here.
+                            </Text>
+                        </View>
+                    ) : (
+                        <>
+                            <ScrollView style={styles.libraryFilterList} showsVerticalScrollIndicator={false}>
+                                {relatedLibraryFilterOptions.map((option) => {
+                                    const isSelected = selectedFilterLibraryIds.includes(option.id);
+                                    return (
+                                        <TouchableOpacity
+                                            key={option.id}
+                                            onPress={() => toggleFilterLibrary(option.id)}
+                                            style={[
+                                                styles.libraryFilterRow,
+                                                {
+                                                    backgroundColor: isSelected ? theme.colors.accentSoft : theme.colors.surfaceMuted,
+                                                    borderColor: isSelected ? theme.colors.accent : theme.colors.border,
+                                                },
+                                            ]}
+                                        >
+                                            {option.coverImageUrl ? (
+                                                <ExpoImage
+                                                    source={{ uri: option.coverImageUrl }}
+                                                    style={styles.libraryFilterCover}
+                                                    contentFit="cover"
+                                                    cachePolicy="memory-disk"
+                                                />
+                                            ) : (
+                                                <View style={[styles.libraryFilterCoverFallback, { backgroundColor: theme.colors.accentSoft }]}>
+                                                    <Ionicons name="folder-open" size={18} color={theme.colors.accent} />
+                                                </View>
+                                            )}
+                                            <View style={styles.libraryFilterRowText}>
+                                                <Text style={[styles.libraryFilterOptionName, { color: theme.colors.text }]} numberOfLines={1}>
+                                                    {option.name}
+                                                </Text>
+                                            </View>
+                                            <Ionicons
+                                                name={isSelected ? 'checkmark-circle' : 'ellipse-outline'}
+                                                size={22}
+                                                color={isSelected ? theme.colors.accent : theme.colors.borderStrong}
+                                            />
+                                        </TouchableOpacity>
+                                    );
+                                })}
+                            </ScrollView>
+
+                            <View style={styles.libraryFilterActions}>
+                                <TouchableOpacity
+                                    onPress={clearMapLibraryFilter}
+                                    style={[styles.libraryFilterSecondaryAction, { borderColor: theme.colors.border }]}
+                                >
+                                    <Text style={[styles.libraryFilterSecondaryText, { color: theme.colors.textSecondary }]}>
+                                        Clear
+                                    </Text>
+                                </TouchableOpacity>
+                                <TouchableOpacity
+                                    onPress={applyLibraryFilter}
+                                    style={[styles.libraryFilterPrimaryAction, { backgroundColor: theme.colors.accent }]}
+                                >
+                                    <Text style={styles.libraryFilterPrimaryText}>Apply</Text>
+                                </TouchableOpacity>
+                            </View>
+                        </>
+                    )}
+                </View>
+            ) : null}
 
             <SearchBar
                 showSearchBar={showSearchBar}
@@ -307,24 +590,33 @@ export default function MapScreen() {
                 handleSelectPlace={handleSelectPlace}
             />
 
-            <View className="h-full w-full rounded-3xl overflow-hidden shadow-lg border-white">
+            <View style={styles.mapShell}>
+                {mapLocationLoading && !location ? (
+                    <View style={styles.mapLocationLoading}>
+                        <ActivityIndicator size="large" color={theme.colors.accent} />
+                    </View>
+                ) : (
                 <MapView
                     ref={mapRef}
                     provider={PROVIDER_GOOGLE}
                     customMapStyle={isDarkMode ? darkMapStyle : undefined}
                     style={{ flex: 1 }}
+                    onMapReady={() => {
+                        mapCurtainOpacity.value = withTiming(0, { duration: 300 });
+                    }}
+                    onMapLoaded={() => setIsMapReady(true)}
                     onPanDrag={() => setMapMoved(true)}
-                    onPress={Keyboard.dismiss}
+                    onPress={() => {
+                        Keyboard.dismiss();
+                        setIsLibraryFilterVisible(false);
+                    }}
                     showsUserLocation={true}
-                    // @ts-ignore
-                    userTrackingMode="followWithHeading"
                     showsCompass={true}
                     rotateEnabled={true}
-                    showsUserLocationHeading={true}
                     showsPointsOfInterest={true}
                     initialRegion={{
-                        latitude: location?.coords.latitude || 32.0853,
-                        longitude: location?.coords.longitude || 34.7818,
+                        latitude: location?.coords.latitude ?? 32.0853,
+                        longitude: location?.coords.longitude ?? 34.7818,
                         latitudeDelta: 0.01,
                         longitudeDelta: 0.01,
                     }}
@@ -340,31 +632,15 @@ export default function MapScreen() {
                         opacity={destinationLatitude !== 0 && userChoseAddress && !isPlaceAlreadySaved ? 1 : 0}
                     />
 
-                    {showMemories &&
-                        visibleOwnedMemories
-                            .filter((m) => isValidMapCoordinate(m.latitude, m.longitude))
-                            .map((memory, index) => (
-                                <MapMemoryMarker
-                                    key={`owned-${markerRenderVersion}-${memory.id}`}
-                                    memory={memory}
-                                    variant="owned"
-                                    index={index}
-                                    onMarkerPress={handleMarkerPress}
-                                />
-                            ))}
-
-                    {showMemories &&
-                        visibleSharedMemories
-                            .filter((m) => isValidMapCoordinate(m.latitude, m.longitude))
-                            .map((memory, index) => (
-                                <MapMemoryMarker
-                                    key={`shared-${markerRenderVersion}-${memory.id}`}
-                                    memory={memory}
-                                    variant="shared"
-                                    index={index}
-                                    onMarkerPress={handleMarkerPress}
-                                />
-                            ))}
+                    {mapMarkersToRender.map(({ memory, variant }) => (
+                        <MapMemoryMarker
+                            key={`${variant}-${markerRenderVersion}-${memory.id}`}
+                            memory={memory}
+                            variant={variant}
+                            sharedSurfaceColor={theme.colors.surface}
+                            onMarkerPress={handleMarkerPress}
+                        />
+                    ))}
 
                     {routeCoordinates?.length && showRoute && (
                         <Polyline
@@ -377,6 +653,17 @@ export default function MapScreen() {
                         />
                     )}
                 </MapView>
+                )}
+
+                {/* Fades out once onMapReady fires, hiding the blank tile-loading phase */}
+                <Animated.View
+                    pointerEvents="none"
+                    style={[
+                        StyleSheet.absoluteFill,
+                        { backgroundColor: theme.colors.background },
+                        mapCurtainStyle,
+                    ]}
+                />
 
                 <View style={{ position: 'absolute', bottom: 30, left: 30, zIndex: 100 }}>
                     {activeMapLibraryFilter && (
@@ -421,21 +708,21 @@ export default function MapScreen() {
                                         ]
                                     );
                                 }}
-                                className="h-[40px] w-[100px] bg-blue-600 rounded-2xl items-center justify-center shadow-lg"
+                                className="h-[36px] min-w-[88px] px-3 bg-blue-600 rounded-xl items-center justify-center shadow-lg"
                             >
-                                <Text className="text-white font-bold text-lg">Route</Text>
+                                <Text className="text-white font-semibold text-[15px]">Route</Text>
                             </TouchableOpacity>
 
                             <TouchableOpacity
                                 onPress={addSelectedPlaceAsMemory}
                                 disabled={isAddingPlace}
-                                className="h-[40px] w-[150px] bg-green-500 rounded-2xl items-center justify-center shadow-lg"
+                                className="h-[36px] min-w-[104px] px-3.5 bg-green-500 rounded-xl items-center justify-center shadow-lg"
                                 style={{ opacity: isAddingPlace ? 0.7 : 1 }}
                             >
                                 {isAddingPlace ? (
                                     <ActivityIndicator size="small" color="white" />
                                 ) : (
-                                    <Text className="text-white font-bold text-lg">Add to Memories</Text>
+                                    <Text className="text-white font-semibold text-[15px]">Add Memo</Text>
                                 )}
                             </TouchableOpacity>
                         </View>
@@ -462,8 +749,8 @@ export default function MapScreen() {
 
                 {routeDistance ? (
                     <View style={{ position: 'absolute', bottom: 80, left: 30, zIndex: 100 }}>
-                        <View className="h-[45px] w-[150px] bg-white p-3 rounded-3xl shadow-sm border border-slate-100 items-center justify-center">
-                            <Text className="text-slate-600 font-bold">🚶 {routeDistance} walk</Text>
+                        <View style={[styles.routeDistancePill, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border }]}>
+                            <Text style={[styles.routeDistanceText, { color: theme.colors.textSecondary }]}>🚶 {routeDistance} walk</Text>
                         </View>
                     </View>
                 ) : null}
@@ -471,12 +758,12 @@ export default function MapScreen() {
                 {mapMoved && (
                     <TouchableOpacity
                         onPress={() => {
-                            returnToStartingPoint();
+                            void returnToStartingPoint({ forceRefresh: true });
                             setMapMoved(false);
                         }}
-                        style={styles.recenterButton}
+                        style={[styles.recenterButton, { backgroundColor: theme.colors.accentSoft, borderColor: theme.colors.accent }]}
                     >
-                        <Ionicons name="locate" size={24} color="#1d4ed8" />
+                        <Ionicons name="locate" size={24} color={theme.colors.accentText} />
                     </TouchableOpacity>
                 )}
             </View>
@@ -496,8 +783,12 @@ export default function MapScreen() {
             />
 
             <LibraryModal
-                visible={isGalleryVisible}
-                onClose={() => setIsGalleryVisible(false)}
+                visible={isGalleryVisible || isCountryLibraryVisible}
+                onClose={() => {
+                    setIsGalleryVisible(false);
+                    setIsCountryLibraryVisible(false);
+                }}
+                variant={isCountryLibraryVisible ? 'countries' : 'custom'}
                 memories={memories}
                 sharedLibraryMemories={sharedLibraryMemories}
                 customFolders={customFolders}
@@ -523,8 +814,8 @@ export default function MapScreen() {
             <ShareMemoryModal
                 visible={isShareMemoryVisible}
                 onClose={() => setIsShareMemoryVisible(false)}
-                shareEmail={shareEmail}
-                setShareEmail={setShareEmail}
+                shareRecipient={shareRecipient}
+                setShareRecipient={setShareRecipient}
                 memoryToShare={memoryToShare}
                 onSubmit={handleShareSubmit}
             />
@@ -544,82 +835,189 @@ export default function MapScreen() {
                 isDarkMode={isDarkMode}
                 setIsDarkMode={setIsDarkMode}
                 showMemories={showMemories}
-                setShowMemories={setShowMemories}
-                onOpenGallery={() => setIsGalleryVisible(true)}
-                onOpenMarketplace={() => setIsMarketplaceVisible(true)}
+                onShowMemoriesChange={handleShowMemoriesChange}
+                showLoginRow={!auth.user}
+                onOpenLogin={() => router.push('/Login')}
+                onOpenMarketplace={() => setMarketplaceVisible(true)}
                 onOpenInvites={() => {
-                    settingsSheetRef.current?.close();
-                    setIsInvitesVisible(true);
+                    if (!auth.user) {
+                        alertRequireSignIn('Sign in to see and manage your invitations.');
+                        return;
+                    }
+                    setInvitesVisible(true);
                 }}
-                onLogout={() => {
-                    auth.logout();
-                    router.replace('/');
+                onOpenInfo={navigateInfo}
+                onOpenAccount={() => {
+                    if (!auth.user) {
+                        alertRequireSignIn('Sign in to open your account settings.');
+                        return;
+                    }
+                    router.push('/account');
                 }}
+                onOpenPlan={() => router.push('/onboarding/plan')}
             />
 
-            <InvitesModal visible={isInvitesVisible} onClose={() => setIsInvitesVisible(false)} />
+            <InvitesModal visible={invitesVisible} onClose={() => setInvitesVisible(false)} />
             <MarketPlaceModal
-                visible={isMarketplaceVisible}
-                onClose={() => setIsMarketplaceVisible(false)}
+                visible={marketplaceVisible}
+                onClose={() => setMarketplaceVisible(false)}
                 userId={auth.user?.id}
                 customFolders={customFolders}
                 memories={memories}
                 reloadMemories={reloadMemories}
             />
+
         </View>
     );
 }
 
 const styles = StyleSheet.create({
-    menuButton: {
-        position: 'absolute',
-        top: 70,
-        right: 18,
-        backgroundColor: 'white',
-        padding: 8,
-        borderRadius: 12,
-        elevation: 10,
-        zIndex: 1000,
-    },
-    markerContainer: {
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.3,
-        shadowRadius: 4,
-        elevation: 5,
-    },
-    markerPinWrapper: {
+    screen: {
+        flex: 1,
         alignItems: 'center',
     },
-    markerAvatarOuter: {
-        width: 68,
-        height: 68,
-        borderRadius: 34,
-        borderWidth: 3,
-        backgroundColor: 'white',
+    mapShell: {
+        height: '100%',
+        width: '100%',
+        borderRadius: 24,
         overflow: 'hidden',
+    },
+    mapLocationLoading: {
+        flex: 1,
         alignItems: 'center',
         justifyContent: 'center',
     },
-    markerAccentRing: {
-        width: 58,
-        height: 58,
-        borderRadius: 29,
-        borderWidth: 2,
-        overflow: 'hidden',
+    menuButton: {
+        position: 'absolute',
+        right: 18,
         backgroundColor: 'transparent',
+        padding: 10,
+        borderRadius: 12,
+        borderWidth: 1,
+        elevation: 10,
+        zIndex: 1000,
     },
-    markerAvatarImage: {
-        width: '100%',
-        height: '100%',
-        borderRadius: 29,
+    filterButton: {
+        position: 'absolute',
+        right: 76,
         backgroundColor: 'transparent',
+        padding: 10,
+        borderRadius: 12,
+        borderWidth: 1,
+        elevation: 10,
+        zIndex: 1000,
     },
-    markerStem: {
-        width: 3,
-        height: 16,
-        marginTop: -5,
-        borderRadius: 999,
+    libraryFilterPopover: {
+        position: 'absolute',
+        right: 76,
+        width: 292,
+        maxHeight: 384,
+        borderRadius: 22,
+        borderWidth: 1,
+        padding: 14,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 8 },
+        shadowOpacity: 0.18,
+        shadowRadius: 14,
+        elevation: 12,
+        zIndex: 1001,
+    },
+    libraryFilterHeader: {
+        flexDirection: 'row',
+        alignItems: 'flex-start',
+        gap: 10,
+        marginBottom: 12,
+    },
+    libraryFilterTitle: {
+        fontSize: 16,
+        fontWeight: '800',
+    },
+    libraryFilterList: {
+        maxHeight: 220,
+    },
+    libraryFilterRow: {
+        minHeight: 58,
+        borderRadius: 16,
+        borderWidth: 1,
+        paddingHorizontal: 12,
+        paddingVertical: 10,
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 10,
+        marginBottom: 8,
+    },
+    libraryFilterCover: {
+        width: 40,
+        height: 40,
+        borderRadius: 12,
+    },
+    libraryFilterCoverFallback: {
+        width: 40,
+        height: 40,
+        borderRadius: 12,
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    libraryFilterRowText: {
+        flex: 1,
+    },
+    libraryFilterOptionName: {
+        fontSize: 14,
+        fontWeight: '700',
+    },
+    libraryFilterActions: {
+        flexDirection: 'row',
+        gap: 10,
+        marginTop: 6,
+    },
+    libraryFilterSecondaryAction: {
+        flex: 1,
+        height: 42,
+        borderRadius: 14,
+        borderWidth: 1,
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    libraryFilterPrimaryAction: {
+        flex: 1,
+        height: 42,
+        borderRadius: 14,
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    libraryFilterSecondaryText: {
+        fontSize: 14,
+        fontWeight: '700',
+    },
+    libraryFilterPrimaryText: {
+        color: 'white',
+        fontSize: 14,
+        fontWeight: '800',
+    },
+    libraryFilterEmpty: {
+        minHeight: 118,
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: 10,
+        paddingHorizontal: 18,
+    },
+    libraryFilterEmptyText: {
+        textAlign: 'center',
+        fontSize: 13,
+        lineHeight: 18,
+        fontWeight: '600',
+    },
+    routeDistancePill: {
+        height: 45,
+        width: 150,
+        padding: 12,
+        borderRadius: 24,
+        borderWidth: 1,
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    routeDistanceText: {
+        fontWeight: '700',
     },
     recenterButton: {
         position: 'absolute',
@@ -638,5 +1036,42 @@ const styles = StyleSheet.create({
         shadowOpacity: 0.26,
         shadowRadius: 10,
         elevation: 6,
+    },
+    markerContainer: {
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.3,
+        shadowRadius: 4,
+        elevation: 5,
+    },
+    markerPinWrapper: {
+        alignItems: 'center',
+    },
+    markerAvatarOuter: {
+        width: 68,
+        height: 68,
+        borderRadius: 34,
+        borderWidth: 3,
+        overflow: 'hidden',
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    markerAccentRing: {
+        width: 58,
+        height: 58,
+        borderRadius: 29,
+        borderWidth: 2,
+        overflow: 'hidden',
+    },
+    markerAvatarImage: {
+        width: 54,
+        height: 54,
+        borderRadius: 27,
+    },
+    markerStem: {
+        width: 3,
+        height: 16,
+        borderRadius: 2,
+        marginTop: -5,
     },
 });

@@ -1,3 +1,4 @@
+import { compressLocalImageForUpload } from '@/lib/imageCompress';
 import { getCountryNameFromCoords, normalizeLocationFolderName, toFolderLookupKey } from '@/lib/geocoding';
 import {
     getCustomFoldersStorageKey,
@@ -15,6 +16,58 @@ function coalesceMetaText(dbValue: unknown, metaValue: string | undefined): stri
         return String(dbValue).trim();
     }
     return metaValue;
+}
+
+function coalesceImportSource(
+    dbValue: unknown,
+    metaValue: Memory['source'],
+): Memory['source'] {
+    const raw = dbValue != null && String(dbValue).trim() !== '' ? String(dbValue).trim() : '';
+    if (raw === 'video_import') return 'video_import';
+    return metaValue === 'video_import' ? 'video_import' : undefined;
+}
+
+function coalesceSourceUrl(dbValue: unknown, metaValue: string | undefined): string | undefined {
+    if (dbValue != null && String(dbValue).trim() !== '') {
+        return String(dbValue).trim();
+    }
+    return metaValue?.trim() ? metaValue.trim() : undefined;
+}
+
+/** One-time migration path: push legacy AsyncStorage-only import fields to Postgres for owned rows. */
+async function backfillImportColumnsFromLocalMeta(
+    userId: string,
+    rows: any[],
+    storedMeta: Record<string, MemoryMeta>,
+): Promise<void> {
+    const tasks = rows.map(async (item: any) => {
+        const memoryId = item.id.toString();
+        const meta = storedMeta[memoryId];
+        if (!meta) return;
+
+        const dbHasSource =
+            item.source != null && String(item.source).trim() !== '';
+        const dbHasUrl =
+            item.source_url != null && String(item.source_url).trim() !== '';
+        if (dbHasSource && dbHasUrl) return;
+
+        const patch: { source?: string; source_url?: string } = {};
+        if (!dbHasSource && meta.source === 'video_import') {
+            patch.source = 'video_import';
+        }
+        if (!dbHasUrl && meta.sourceUrl?.trim()) {
+            patch.source_url = meta.sourceUrl.trim();
+        }
+        if (Object.keys(patch).length === 0) return;
+
+        await supabase
+            .from('memories')
+            .update(patch)
+            .eq('id', memoryId)
+            .eq('user_id', userId);
+    });
+
+    await Promise.all(tasks);
 }
 
 function mapLibraryRow(library: any, userId: string, roleByLibraryId: Record<string, CustomFolder['role']>): CustomFolder {
@@ -41,6 +94,8 @@ export interface LoadedMemories {
     customFolders: CustomFolder[];
     sharedMap: Record<string, Memory[]>;
 }
+
+export type LoadUserMemoriesResult = ({ ok: true } & LoadedMemories) | { ok: false };
 
 export async function fetchLibraryState(userId: string): Promise<LibraryState> {
     const { data: memberRows, error: membersError } = await supabase
@@ -190,7 +245,29 @@ export async function buildFormattedMemories(
             const existingMeta = nextMeta[memoryId] ?? storedMeta[memoryId] ?? { customFolderIds: [] };
             const title = coalesceMetaText(item.title, existingMeta.title);
             const description = coalesceMetaText(item.description, existingMeta.description);
-            let country = existingMeta.country ? normalizeLocationFolderName(existingMeta.country) : existingMeta.country;
+            const source = coalesceImportSource(item.source, existingMeta.source);
+            const sourceUrl = coalesceSourceUrl(item.source_url, existingMeta.sourceUrl);
+
+            const rawDbCountry = item.country;
+            const fromDb =
+                rawDbCountry != null && String(rawDbCountry).trim() !== ''
+                    ? normalizeLocationFolderName(String(rawDbCountry).trim())
+                    : undefined;
+
+            let country = fromDb;
+
+            if (!country) {
+                const metaC = existingMeta.country;
+                const isUnknownPlaceholder =
+                    typeof metaC === 'string' && metaC.trim().toLowerCase() === 'unknown location';
+                const fromMeta =
+                    metaC != null &&
+                    String(metaC).trim() !== '' &&
+                    !isUnknownPlaceholder
+                        ? normalizeLocationFolderName(String(metaC).trim())
+                        : undefined;
+                country = fromMeta;
+            }
 
             if (!country) {
                 country = await getCountryNameFromCoords(item.latitude, item.longitude);
@@ -200,6 +277,8 @@ export async function buildFormattedMemories(
                     description,
                     customFolderIds: memoLibraryIdsMap[memoryId] ?? [],
                     excludeFromCountryFolder: existingMeta.excludeFromCountryFolder ?? false,
+                    source,
+                    sourceUrl,
                 };
                 didUpdateMeta = true;
             } else if (country !== existingMeta.country) {
@@ -209,6 +288,8 @@ export async function buildFormattedMemories(
                     description,
                     customFolderIds: memoLibraryIdsMap[memoryId] ?? [],
                     excludeFromCountryFolder: existingMeta.excludeFromCountryFolder ?? false,
+                    source,
+                    sourceUrl,
                 };
                 didUpdateMeta = true;
             }
@@ -227,6 +308,8 @@ export async function buildFormattedMemories(
                 description,
                 customFolderIds: memoLibraryIdsMap[memoryId] ?? [],
                 excludeFromCountryFolder: existingMeta.excludeFromCountryFolder ?? false,
+                source,
+                sourceUrl,
             };
         })
     );
@@ -241,11 +324,12 @@ export async function uploadPicture(
     tempId: string,
     country: string,
     userId: string,
-    options?: { title?: string; description?: string }
+    options?: { title?: string; description?: string; source?: Memory['source']; sourceUrl?: string }
 ): Promise<{ persistedId: string; publicUrl: string } | null> {
     try {
         const fileName = `${tempId}.jpg`;
-        const response = await fetch(photoUri);
+        const uriForUpload = await compressLocalImageForUpload(photoUri);
+        const response = await fetch(uriForUpload);
         const blob = await response.blob();
         const arrayBuffer = await new Response(blob).arrayBuffer();
 
@@ -260,6 +344,13 @@ export async function uploadPicture(
         const titleVal = options?.title?.trim() || null;
         const descVal = options?.description?.trim() || null;
 
+        const storedMeta = await loadMemoryMeta(userId);
+        const tempMetaBefore = storedMeta[tempId];
+        const resolvedSource =
+            options?.source ?? tempMetaBefore?.source ?? null;
+        const resolvedSourceUrl =
+            (options?.sourceUrl ?? tempMetaBefore?.sourceUrl)?.trim() || null;
+
         const { data: insertedMemory, error: dbError } = await supabase
             .from('memories')
             .insert([{
@@ -269,6 +360,10 @@ export async function uploadPicture(
                 user_id: userId,
                 title: titleVal,
                 description: descVal,
+                source: resolvedSource,
+                source_url: resolvedSourceUrl,
+                country: normalizeLocationFolderName(country),
+                formatted_address: null,
             }])
             .select('id')
             .single();
@@ -277,7 +372,6 @@ export async function uploadPicture(
 
         const persistedId = insertedMemory.id.toString();
 
-        const storedMeta = await loadMemoryMeta(userId);
         const nextMeta = { ...storedMeta };
         const tempMeta = nextMeta[tempId];
         delete nextMeta[tempId];
@@ -287,6 +381,8 @@ export async function uploadPicture(
             description: coalesceMetaText(descVal, tempMeta?.description),
             customFolderIds: tempMeta?.customFolderIds ?? [],
             excludeFromCountryFolder: tempMeta?.excludeFromCountryFolder ?? false,
+            source: coalesceImportSource(resolvedSource, tempMeta?.source),
+            sourceUrl: coalesceSourceUrl(resolvedSourceUrl, tempMeta?.sourceUrl),
         };
         await saveMemoryMeta(userId, nextMeta);
 
@@ -304,7 +400,8 @@ export async function uploadLibraryCover(
 ): Promise<{ publicUrl: string } | null> {
     try {
         const fileName = `library-covers/${folderId}-${Date.now()}.jpg`;
-        const response = await fetch(imageUri);
+        const uriForUpload = await compressLocalImageForUpload(imageUri);
+        const response = await fetch(uriForUpload);
         const blob = await response.blob();
         const arrayBuffer = await new Response(blob).arrayBuffer();
 
@@ -323,18 +420,24 @@ export async function uploadLibraryCover(
     }
 }
 
-export async function loadUserMemories(userId: string): Promise<LoadedMemories> {
-    const { data, error } = await supabase.from('memories').select('*').eq('user_id', userId);
+export async function loadUserMemories(userId: string): Promise<LoadUserMemoriesResult> {
+    const { data, error } = await supabase
+        .from('memories')
+        .select('*')
+        .eq('user_id', userId)
+        .is('deleted_at', null);
 
     if (error || !data) {
         console.error('Fetch Error:', error?.message);
-        return { memories: [], customFolders: [], sharedMap: {} };
+        return { ok: false };
     }
+
+    const storedMeta = await loadMemoryMeta(userId);
+    await backfillImportColumnsFromLocalMeta(userId, data, storedMeta);
 
     await migrateLocalLibrariesToSupabase(userId, data);
 
     const { folders, memoLibraryIdsMap } = await fetchLibraryState(userId);
-    const storedMeta = await loadMemoryMeta(userId);
     const nextMeta: Record<string, MemoryMeta> = { ...storedMeta };
 
     const { formattedMemories, didUpdateMeta } = await buildFormattedMemories(
@@ -350,7 +453,8 @@ export async function loadUserMemories(userId: string): Promise<LoadedMemories> 
         const { data: sharedMemoryRows, error: sharedError } = await supabase
             .from('memories')
             .select('*')
-            .in('id', sharedMemoIds);
+            .in('id', sharedMemoIds)
+            .is('deleted_at', null);
 
         if (sharedError || !sharedMemoryRows) {
             console.error('Could not load shared library memos:', sharedError?.message);
@@ -381,5 +485,10 @@ export async function loadUserMemories(userId: string): Promise<LoadedMemories> 
         await saveMemoryMeta(userId, nextMeta);
     }
 
-    return { memories: formattedMemories, customFolders: folders, sharedMap };
+    return {
+        ok: true,
+        memories: formattedMemories,
+        customFolders: folders,
+        sharedMap,
+    };
 }

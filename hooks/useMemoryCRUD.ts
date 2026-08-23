@@ -1,12 +1,15 @@
 import { getCountryNameFromCoords, normalizeLocationFolderName } from '@/lib/geocoding';
+import { deleteOwnedMemory } from '@/lib/deleteOwnedMemory';
 import { uploadPicture } from '@/lib/memoryApi';
 import { loadMemoryMeta, saveMemoryMeta } from '@/lib/memoryStorage';
+import { alertRequireSignIn } from '@/lib/requireSignInAlert';
 import { supabase } from '@/lib/supabase';
 import { Memory } from '@/types/memory';
 import { User } from '@supabase/supabase-js';
 import * as ImagePicker from 'expo-image-picker';
 import * as Location from 'expo-location';
 import { useCallback } from 'react';
+import { Alert } from 'react-native';
 
 interface Params {
     user: User | null;
@@ -16,23 +19,33 @@ interface Params {
 
 interface AddPlaceMemoryOptions {
     customFolderIds?: string[];
+    source?: 'video_import';
+    sourceUrl?: string;
 }
 
 export function useMemoryCRUD({ user, memoriesRef, setMemories }: Params) {
 
     const addMemory = useCallback(async (): Promise<void> => {
-
-        if (!user?.id) return;
         const cameraPermission = await ImagePicker.requestCameraPermissionsAsync();
         const locationPermission = await Location.requestForegroundPermissionsAsync();
 
         if (cameraPermission.status !== 'granted' || locationPermission.status !== 'granted') {
-            alert('Permissions required to save memories!');
+            Alert.alert('Permissions needed', 'Allow camera and location to take a memo photo.');
             return;
         }
 
-        const cameraResult = await ImagePicker.launchCameraAsync();
+        const cameraResult = await ImagePicker.launchCameraAsync({
+            quality: 0.85,
+        });
         if (cameraResult.canceled) return;
+
+        if (!user?.id) {
+            alertRequireSignIn(
+                'Create a free account to save photos to your map and sync them across devices.',
+                'Nice shot!',
+            );
+            return;
+        }
 
         const currentLocation = await Location.getCurrentPositionAsync();
         const photoUri = cameraResult.assets[0].uri;
@@ -85,6 +98,8 @@ export function useMemoryCRUD({ user, memoriesRef, setMemories }: Params) {
         const trimmedTitle = title?.trim();
         const displayCountry = normalizeLocationFolderName(country);
         const customFolderIds = options?.customFolderIds ?? [];
+        const source = options?.source;
+        const sourceUrl = options?.sourceUrl;
         const localMemory: Memory = {
             id: tempId,
             uri: photoUri,
@@ -95,6 +110,8 @@ export function useMemoryCRUD({ user, memoriesRef, setMemories }: Params) {
             title: trimmedTitle || undefined,
             description: trimmedDescription || undefined,
             customFolderIds,
+            source,
+            sourceUrl,
         };
 
         setMemories(prev => [...prev, localMemory]);
@@ -108,12 +125,16 @@ export function useMemoryCRUD({ user, memoriesRef, setMemories }: Params) {
                 description: trimmedDescription || undefined,
                 customFolderIds,
                 excludeFromCountryFolder: false,
+                source,
+                sourceUrl,
             },
         });
 
         const result = await uploadPicture(photoUri, lat, lng, tempId, displayCountry, user.id, {
             title: trimmedTitle,
             description: trimmedDescription,
+            source,
+            sourceUrl,
         });
         if (result) {
             let persistedFolderIds = customFolderIds;
@@ -147,6 +168,22 @@ export function useMemoryCRUD({ user, memoriesRef, setMemories }: Params) {
                 }
             }
 
+            const latestStoredMeta = await loadMemoryMeta(user.id);
+            await saveMemoryMeta(user.id, {
+                ...latestStoredMeta,
+                [result.persistedId]: {
+                    ...(latestStoredMeta[tempId] ?? latestStoredMeta[result.persistedId] ?? {
+                        country: displayCountry,
+                        title: trimmedTitle || undefined,
+                        description: trimmedDescription || undefined,
+                        customFolderIds: persistedFolderIds,
+                        excludeFromCountryFolder: false,
+                    }),
+                    source,
+                    sourceUrl,
+                },
+            });
+
             setMemories(prev => prev.map(m =>
                 m.id === tempId
                     ? { ...m, id: result.persistedId, uri: result.publicUrl, customFolderIds: persistedFolderIds }
@@ -162,25 +199,23 @@ export function useMemoryCRUD({ user, memoriesRef, setMemories }: Params) {
     const deleteMemory = useCallback(async (memoryID: string): Promise<void> => {
         if (!user?.id) return;
         const memoryToDelete = memoriesRef.current.find(m => m.id === memoryID);
-        if (!memoryToDelete || memoryToDelete.deletedAt) return;
+        if (!memoryToDelete || memoryToDelete.deletedAt || memoryToDelete.isShared) return;
 
-        const archivedAt = new Date().toISOString();
+        const previousMemories = memoriesRef.current;
+        setMemories(prev => prev.filter(memory => memory.id !== memoryID));
 
-        setMemories(prev => prev.map(memory =>
-            memory.id === memoryID
-                ? { ...memory, deletedAt: archivedAt }
-                : memory
-        ));
+        const result = await deleteOwnedMemory(memoryID);
+        if (!result.ok) {
+            setMemories(previousMemories);
+            Alert.alert('Delete failed', result.error);
+            return;
+        }
 
-        // Hard delete is intentionally reserved for a separate purge flow because shared libraries
-        // still reference the canonical memo row and storage object.
-        const { error: dbError } = await supabase
-            .from('memories')
-            .update({ deleted_at: archivedAt })
-            .eq('id', memoryID)
-            .eq('user_id', user.id);
-        if (dbError) {
-            console.error('Memo archive failed:', dbError.message);
+        const storedMeta = await loadMemoryMeta(user.id);
+        if (storedMeta[memoryID]) {
+            const nextMeta = { ...storedMeta };
+            delete nextMeta[memoryID];
+            await saveMemoryMeta(user.id, nextMeta);
         }
     }, [user, memoriesRef, setMemories]);
 
@@ -207,6 +242,8 @@ export function useMemoryCRUD({ user, memoriesRef, setMemories }: Params) {
                 description: trimmedDescription || undefined,
                 customFolderIds: targetMemory.customFolderIds,
                 excludeFromCountryFolder: targetMemory.excludeFromCountryFolder ?? false,
+                source: targetMemory.source,
+                sourceUrl: targetMemory.sourceUrl,
             },
         });
 

@@ -1,13 +1,24 @@
+import { useAppTheme } from '@/context/ThemeContext';
 import { supabase } from '@/lib/supabase';
-import { useRouter } from "expo-router";
-import React, { useState } from 'react';
+import { Ionicons } from '@expo/vector-icons';
+import { Link, useRouter } from 'expo-router';
+import React, { useCallback, useState } from 'react';
 import { ActivityIndicator, Alert, SafeAreaView, Text, TextInput, TouchableOpacity, View } from 'react-native';
 
 export default function LoginScreen() {
     const router = useRouter();
+    const { theme } = useAppTheme();
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
     const [loading, setLoading] = useState(false);
+
+    const handleBack = useCallback(() => {
+        if (router.canGoBack()) {
+            router.back();
+            return;
+        }
+        router.replace('/onboarding/Home');
+    }, [router]);
 
     async function handleLogin() {
         if (!email || !password) {
@@ -31,45 +42,69 @@ export default function LoginScreen() {
 
 
     return (
-        <SafeAreaView className="flex-1 bg-white px-6 ">
-            <Text className="text-3xl font-bold text-slate-800 mb-2">Log in</Text>
-            <Text className="text-slate-500 mb-8">Good to see you are back!</Text>
+        <SafeAreaView className="flex-1" style={{ backgroundColor: theme.colors.background }}>
+            <View className="flex-1 px-6">
+                <TouchableOpacity
+                    accessibilityRole="button"
+                    accessibilityLabel="Back"
+                    onPress={handleBack}
+                    hitSlop={12}
+                    className="mt-2 self-start p-2 -ml-2"
+                >
+                    <Ionicons name="chevron-back" size={28} color={theme.colors.text} />
+                </TouchableOpacity>
 
-            {/* Name Input */}
-            <View className="mb-4">
-                <Text className="text-slate-600 font-medium mb-2">Email address</Text>
-                <TextInput
-                    className="bg-slate-50 border border-slate-200 p-4 rounded-2xl text-slate-800"
-                    placeholder="Smaul Deek"
-                    value={email}
-                    onChangeText={setEmail}
-                />
+                <View className="pt-14">
+                    <Text className="text-3xl font-bold mb-2" style={{ color: theme.colors.text }}>Log in</Text>
+                    <Text className="mb-8" style={{ color: theme.colors.textMuted }}>Good to see you are back!</Text>
+
+                    <View className="mb-4">
+                        <Text className="font-medium mb-2" style={{ color: theme.colors.textSecondary }}>Email address</Text>
+                        <TextInput
+                            className="border p-4 rounded-2xl"
+                            style={{ backgroundColor: theme.colors.input, borderColor: theme.colors.border, color: theme.colors.text }}
+                            placeholder="Smaul Deek"
+                            placeholderTextColor={theme.colors.placeholder}
+                            value={email}
+                            onChangeText={setEmail}
+                        />
+                    </View>
+
+                    <View className="mb-8">
+                        <Text className="font-medium mb-2" style={{ color: theme.colors.textSecondary }}>Password</Text>
+                        <TextInput
+                            className="border p-4 rounded-2xl"
+                            style={{ backgroundColor: theme.colors.input, borderColor: theme.colors.border, color: theme.colors.text }}
+                            placeholder="Your best password"
+                            placeholderTextColor={theme.colors.placeholder}
+                            secureTextEntry
+                            value={password}
+                            onChangeText={setPassword}
+                        />
+                    </View>
+
+                    <TouchableOpacity
+                        onPress={handleLogin}
+                        disabled={loading}
+                        className="mx-auto h-[55px] w-[275px] bg-blue-600 p-4 rounded-2xl items-center justify-center shadow-lg"
+                    >
+                        {loading ? (
+                            <ActivityIndicator color="white" />
+                        ) : (
+                            <Text className="text-white font-bold text-lg">Sign In</Text>
+                        )}
+                    </TouchableOpacity>
+
+                    <Link href="/SignUp" asChild>
+                        <TouchableOpacity className="mt-6 items-center">
+                            <Text style={{ color: theme.colors.textMuted }}>
+                                Don&apos;t have an account?{' '}
+                                <Text className="font-bold" style={{ color: theme.colors.accent }}>Sign Up</Text>
+                            </Text>
+                        </TouchableOpacity>
+                    </Link>
+                </View>
             </View>
-
-            {/* Email Input */}
-            <View className="mb-8">
-                <Text className="text-slate-600 font-medium mb-2">Password</Text>
-                <TextInput
-                    className="bg-slate-50 border border-slate-200 p-4 rounded-2xl text-slate-800"
-                    placeholder="Your best password"
-                    secureTextEntry
-                    value={password}
-                    onChangeText={setPassword}
-                />
-            </View>
-
-            {/* Sign In Button */}
-            <TouchableOpacity
-                onPress={handleLogin}
-                disabled={loading}
-                className="mx-auto h-[55px] w-[275px] bg-blue-600 p-4 rounded-2xl items-center justify-center shadow-lg"
-            >
-                {loading ? (
-                    <ActivityIndicator color="white" />
-                ) : (
-                    <Text className="text-white font-bold text-lg">Sign In</Text>
-                )}
-            </TouchableOpacity>
         </SafeAreaView>
     );
 }

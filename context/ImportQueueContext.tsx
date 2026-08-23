@@ -10,12 +10,29 @@ import React, {
     useRef,
     useState,
 } from 'react';
+import { AppState } from 'react-native';
 import { useAuth } from './AuthContext';
 
 const GOOGLE_API_KEY = process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY;
 const SUPABASE_URL = process.env.EXPO_PUBLIC_SUPABASE_URL ?? '';
 const SUPABASE_ANON_KEY = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY ?? '';
 const PLACEHOLDER_PHOTO = 'https://placehold.co/400x400/e2e8f0/94a3b8.png?text=?';
+/** Orphaned server jobs (edge wall-clock killed background work without updating the row). */
+const STALE_JOB_MS = 10 * 60 * 1000;
+const STALE_JOB_ERROR =
+    'Import timed out on the server. Tap Retry — Instagram reels finish much faster than photo posts.';
+const POLL_INTERVAL_MS = 3_000;
+const NETWORK_ERROR_LOG_COOLDOWN_MS = 60_000;
+
+function isTransientNetworkError(message: string): boolean {
+    const lower = message.toLowerCase();
+    return (
+        lower.includes('network request failed')
+        || lower.includes('failed to fetch')
+        || lower.includes('network error')
+        || lower.includes('aborted')
+    );
+}
 
 export interface ResolvedPlaceData {
     placeId: string;
@@ -46,6 +63,8 @@ interface ImportQueueContextType {
     markSaved: (jobId: string, key: string) => void;
     removeJob: (jobId: string) => void;
     clearDoneJobs: () => void;
+    /** Re-fetch active jobs from DB (use while Import tab is open). */
+    refreshJobs: () => void;
 }
 
 const ImportQueueContext = createContext<ImportQueueContextType | undefined>(undefined);
@@ -58,13 +77,63 @@ function dbStatusToLocal(dbStatus: string): ImportJobStatus {
     return 'loading'; // pending | processing → loading
 }
 
+function isStaleDbRow(status: string, updatedAt: string): boolean {
+    if (status !== 'pending' && status !== 'processing') return false;
+    return Date.now() - new Date(updatedAt).getTime() > STALE_JOB_MS;
+}
+
+function rowToImportJob(row: {
+    id: string;
+    url: string;
+    status: string;
+    result: ModalImportResult | null;
+    error: string | null;
+    created_at: string;
+    updated_at: string;
+}): ImportJob {
+    if (isStaleDbRow(row.status, row.updated_at)) {
+        return {
+            id: row.id,
+            url: row.url,
+            status: 'error',
+            result: null,
+            error: STALE_JOB_ERROR,
+            savedKeys: [],
+            resolvedPlaces: {},
+            enqueuedAt: row.created_at,
+        };
+    }
+    return {
+        id: row.id,
+        url: row.url,
+        status: dbStatusToLocal(row.status),
+        result: row.result ?? null,
+        error: row.error ?? null,
+        savedKeys: [],
+        resolvedPlaces: {},
+        enqueuedAt: row.created_at,
+    };
+}
+
+async function markStaleJobFailed(jobId: string): Promise<void> {
+    await supabase
+        .from('video_import_jobs')
+        .update({ status: 'error', error: STALE_JOB_ERROR })
+        .eq('id', jobId);
+}
+
 // ─── Provider ────────────────────────────────────────────────────────────────
 
+const REALTIME_USER_FILTER = (userId: string) => `user_id=eq.${userId}`;
+
 export function ImportQueueProvider({ children }: { children: React.ReactNode }) {
-    const { user } = useAuth();
+    const { user, session } = useAuth();
     const [jobs, setJobs] = useState<ImportJob[]>([]);
-    // Track in-flight enqueues to prevent duplicate submissions
     const enqueuingUrlsRef = useRef<Set<string>>(new Set());
+    const jobsRef = useRef<ImportJob[]>([]);
+    const refreshInFlightRef = useRef(false);
+    const lastNetworkErrorLogAtRef = useRef(0);
+    jobsRef.current = jobs;
 
     // ── Google Places resolution (still client-side) ──────────────────────────
 
@@ -135,16 +204,20 @@ export function ImportQueueProvider({ children }: { children: React.ReactNode })
             .limit(20)
             .then(({ data }) => {
                 if (!data) return;
-                const loaded: ImportJob[] = data.map((row: any) => ({
-                    id: row.id,
-                    url: row.url,
-                    status: dbStatusToLocal(row.status),
-                    result: row.result ?? null,
-                    error: row.error ?? null,
-                    savedKeys: [],
-                    resolvedPlaces: {},
-                    enqueuedAt: row.created_at,
-                }));
+                const loaded: ImportJob[] = data.map((row: {
+                    id: string;
+                    url: string;
+                    status: string;
+                    result: ModalImportResult | null;
+                    error: string | null;
+                    created_at: string;
+                    updated_at: string;
+                }) => rowToImportJob(row));
+                for (const row of data) {
+                    if (isStaleDbRow(row.status, row.updated_at)) {
+                        void markStaleJobFailed(row.id);
+                    }
+                }
                 setJobs(loaded);
                 // Kick off Google Places for any already-done jobs
                 loaded.forEach(job => {
@@ -160,78 +233,220 @@ export function ImportQueueProvider({ children }: { children: React.ReactNode })
     useEffect(() => {
         if (!user) return;
 
-        const mapRowToJob = (row: Record<string, unknown>): ImportJob => ({
-            id: row.id as string,
-            url: row.url as string,
-            status: dbStatusToLocal(row.status as string),
-            result: (row.result ?? null) as ModalImportResult | null,
-            error: (row.error ?? null) as string | null,
-            savedKeys: [],
-            resolvedPlaces: {},
-            enqueuedAt: row.created_at as string,
-        });
+        let channel: ReturnType<typeof supabase.channel> | null = null;
+        let cancelled = false;
 
-        const applyDoneResolution = (row: Record<string, unknown>) => {
-            const status = dbStatusToLocal(row.status as string);
-            const result: ModalImportResult | null = (row.result ?? null) as ModalImportResult | null;
-            if (status === 'done' && result && result.places.length > 0) {
-                void resolvePlacesForJob(row.id as string, result.places);
-            }
+        const mergeRowIntoJobs = (
+            prev: ImportJob[],
+            row: Record<string, unknown>,
+        ): ImportJob[] => {
+            const job = rowToImportJob({
+                id: row.id as string,
+                url: row.url as string,
+                status: row.status as string,
+                result: (row.result ?? null) as ModalImportResult | null,
+                error: (row.error ?? null) as string | null,
+                created_at: row.created_at as string,
+                updated_at: row.updated_at as string,
+            });
+            const exists = prev.some(j => j.id === job.id);
+            const base = exists ? prev : [job, ...prev];
+            return base.map(j => {
+                if (j.id !== job.id) return j;
+                const merged = { ...job, savedKeys: j.savedKeys, resolvedPlaces: j.resolvedPlaces };
+                if (
+                    j.status === 'loading'
+                    && merged.status === 'done'
+                    && merged.result
+                    && merged.result.places.length > 0
+                ) {
+                    void resolvePlacesForJob(merged.id, merged.result.places);
+                }
+                return merged;
+            });
         };
 
-        const channel = supabase
-            .channel(`import-jobs:${user.id}`)
-            .on(
-                'postgres_changes',
-                {
-                    event: 'INSERT',
-                    schema: 'public',
-                    table: 'video_import_jobs',
-                    filter: `user_id=eq.${user.id}`,
-                },
-                (payload) => {
-                    const row = payload.new as Record<string, unknown>;
-                    const job = mapRowToJob(row);
-                    setJobs(prev => {
-                        if (prev.some(j => j.id === job.id)) return prev;
-                        return [job, ...prev];
-                    });
-                    applyDoneResolution(row);
-                }
-            )
-            .on(
-                'postgres_changes',
-                {
-                    event: 'UPDATE',
-                    schema: 'public',
-                    table: 'video_import_jobs',
-                    filter: `user_id=eq.${user.id}`,
-                },
-                (payload) => {
-                    const row = payload.new as Record<string, unknown>;
-                    const status = dbStatusToLocal(row.status as string);
-                    const result: ModalImportResult | null = (row.result ?? null) as ModalImportResult | null;
+        const setup = async () => {
+            const accessToken = session?.access_token;
+            if (!accessToken || cancelled) return;
+            await supabase.realtime.setAuth(accessToken);
+            if (cancelled) return;
 
-                    setJobs(prev => {
-                        const exists = prev.some(j => j.id === row.id);
-                        if (!exists) {
-                            return [mapRowToJob(row), ...prev];
-                        }
-                        return prev.map(j => j.id === row.id
-                            ? { ...j, status, result, error: (row.error ?? null) as string | null }
-                            : j
+            const rowFilter = REALTIME_USER_FILTER(user.id);
+
+            channel = supabase
+                .channel(`import-jobs:${user.id}`)
+                .on(
+                    'postgres_changes',
+                    {
+                        event: 'INSERT',
+                        schema: 'public',
+                        table: 'video_import_jobs',
+                        filter: rowFilter,
+                    },
+                    (payload) => {
+                        const row = payload.new as Record<string, unknown>;
+                        setJobs(prev => mergeRowIntoJobs(prev, row));
+                    },
+                )
+                .on(
+                    'postgres_changes',
+                    {
+                        event: 'UPDATE',
+                        schema: 'public',
+                        table: 'video_import_jobs',
+                        filter: rowFilter,
+                    },
+                    (payload) => {
+                        const row = payload.new as Record<string, unknown>;
+                        setJobs(prev => mergeRowIntoJobs(prev, row));
+                    },
+                )
+                .subscribe((status, err) => {
+                    if (status === 'CHANNEL_ERROR') {
+                        console.warn(
+                            '[ImportQueue] realtime channel error (imports still sync via polling):',
+                            err?.message ?? 'unknown',
                         );
-                    });
+                    }
+                });
+        };
 
-                    applyDoneResolution(row);
-                }
-            )
-            .subscribe();
+        void setup();
 
         return () => {
-            void supabase.removeChannel(channel);
+            cancelled = true;
+            if (channel) void supabase.removeChannel(channel);
         };
+    }, [user, session?.access_token, resolvePlacesForJob]);
+
+    // Full sync from DB — avoids broken .in('id', ['temp-…']) polls and missed Realtime events
+    const refreshJobs = useCallback(async () => {
+        if (!user) return;
+        if (!SUPABASE_URL) return;
+        if (AppState.currentState !== 'active') return;
+        if (refreshInFlightRef.current) return;
+
+        refreshInFlightRef.current = true;
+
+        let data:
+            | Array<{
+                id: string;
+                url: string;
+                status: string;
+                result: ModalImportResult | null;
+                error: string | null;
+                created_at: string;
+                updated_at: string;
+            }>
+            | null = null;
+        let error: { message: string } | null = null;
+
+        try {
+            const result = await supabase
+                .from('video_import_jobs')
+                .select('id, url, status, result, error, created_at, updated_at')
+                .eq('user_id', user.id)
+                .neq('status', 'error')
+                .order('created_at', { ascending: false })
+                .limit(20);
+            data = result.data;
+            error = result.error;
+        } catch (err) {
+            const message = err instanceof Error ? err.message : String(err);
+            if (isTransientNetworkError(message)) {
+                const now = Date.now();
+                if (now - lastNetworkErrorLogAtRef.current > NETWORK_ERROR_LOG_COOLDOWN_MS) {
+                    lastNetworkErrorLogAtRef.current = now;
+                    console.warn('[ImportQueue] refreshJobs: offline or unreachable, will retry');
+                }
+            } else {
+                console.error('[ImportQueue] refreshJobs:', message);
+            }
+            return;
+        } finally {
+            refreshInFlightRef.current = false;
+        }
+
+        if (error) {
+            if (isTransientNetworkError(error.message)) {
+                const now = Date.now();
+                if (now - lastNetworkErrorLogAtRef.current > NETWORK_ERROR_LOG_COOLDOWN_MS) {
+                    lastNetworkErrorLogAtRef.current = now;
+                    console.warn('[ImportQueue] refreshJobs: offline or unreachable, will retry');
+                }
+            } else {
+                console.error('[ImportQueue] refreshJobs:', error.message);
+            }
+            return;
+        }
+        if (!data) return;
+
+        for (const row of data) {
+            if (isStaleDbRow(row.status, row.updated_at)) {
+                void markStaleJobFailed(row.id);
+            }
+        }
+
+        const prev = jobsRef.current;
+
+        setJobs(() => {
+            const prevById = new Map(prev.map(j => [j.id, j]));
+            const prevByUrl = new Map(prev.map(j => [j.url, j]));
+
+            const synced = data.map(row => {
+                const old = prevById.get(row.id) ?? prevByUrl.get(row.url);
+                const next = rowToImportJob(row);
+                return {
+                    ...next,
+                    savedKeys: old?.savedKeys ?? [],
+                    resolvedPlaces: old?.resolvedPlaces ?? {},
+                };
+            });
+
+            const temps = prev.filter(
+                j => j.id.startsWith('temp-') && !data.some(r => r.url === j.url),
+            );
+
+            return [...temps, ...synced];
+        });
+
+        for (const row of data) {
+            const old = prev.find(j => j.id === row.id || j.url === row.url);
+            const job = rowToImportJob(row);
+            if (
+                old?.status === 'loading'
+                && job.status === 'done'
+                && job.result
+                && job.result.places.length > 0
+            ) {
+                void resolvePlacesForJob(job.id, job.result.places);
+            }
+        }
     }, [user, resolvePlacesForJob]);
+
+    useEffect(() => {
+        if (!user) return;
+
+        void refreshJobs();
+
+        const interval = setInterval(() => {
+            const hasLoading = jobsRef.current.some(j => j.status === 'loading');
+            if (!hasLoading || AppState.currentState !== 'active') return;
+            void refreshJobs();
+        }, POLL_INTERVAL_MS);
+
+        const appStateSub = AppState.addEventListener('change', state => {
+            if (state !== 'active') return;
+            const hasLoading = jobsRef.current.some(j => j.status === 'loading');
+            if (hasLoading) void refreshJobs();
+        });
+
+        return () => {
+            clearInterval(interval);
+            appStateSub.remove();
+        };
+    }, [user, refreshJobs]);
 
     // ── Public actions ────────────────────────────────────────────────────────
 
@@ -336,7 +551,8 @@ export function ImportQueueProvider({ children }: { children: React.ReactNode })
         markSaved,
         removeJob,
         clearDoneJobs,
-    }), [jobs, enqueueUrl, retryJob, markSaved, removeJob, clearDoneJobs]);
+        refreshJobs: () => void refreshJobs(),
+    }), [jobs, enqueueUrl, retryJob, markSaved, removeJob, clearDoneJobs, refreshJobs]);
 
     return (
         <ImportQueueContext.Provider value={value}>

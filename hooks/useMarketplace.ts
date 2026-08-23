@@ -1,4 +1,5 @@
 import {
+    clearMarketLibraryDownloadRecords,
     downloadMarketLibrary,
     excludeLibraryMemosFromCountryFolders,
     getMarketLibraryDetails,
@@ -149,8 +150,17 @@ export function useMarketplace({ userId, customFolders, memories, reloadMemories
             return { data: null, error: 'You cannot download your own marketplace library.' };
         }
 
-        if (downloadedMarketLibraryIds.includes(marketLibraryId)) {
+        const activeDownloads = await listDownloadedMarketLibraryIds();
+        if (activeDownloads.error) {
+            return { data: null, error: activeDownloads.error };
+        }
+        if (activeDownloads.data?.includes(marketLibraryId)) {
             return { data: null, error: 'You have already downloaded this marketplace library.' };
+        }
+
+        const cleared = await clearMarketLibraryDownloadRecords(marketLibraryId);
+        if (cleared.error) {
+            return { data: null, error: cleared.error };
         }
 
         setDownloadingLibraryId(marketLibraryId);
@@ -180,7 +190,7 @@ export function useMarketplace({ userId, customFolders, memories, reloadMemories
 
         setDownloadingLibraryId(null);
         return result;
-    }, [downloadedMarketLibraryIds, marketLibraries, refreshMarketLibraries, reloadMemories, selectedDetails, userId]);
+    }, [marketLibraries, refreshMarketLibraries, reloadMemories, selectedDetails, userId]);
 
     return {
         marketLibraries,

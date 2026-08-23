@@ -1,73 +1,68 @@
-const { withDangerousMod } = require('@expo/config-plugins');
 const fs = require('fs');
 const path = require('path');
+const {
+  createRunOncePlugin,
+  withDangerousMod,
+} = require('@expo/config-plugins');
 
-function getShareExtensionFolderName(iosShareExtensionName) {
-  // expo-share-intent uses the raw iosShareExtensionName as the folder name (spaces and all).
-  // We must match it exactly or our file lands in a different folder that Xcode never compiles.
-  return iosShareExtensionName || 'ShareExtension';
+const SHARE_EXT_FOLDER = 'ShareExtension';
+const VIEW_CONTROLLER = 'ShareViewController.swift';
+
+function getSupabaseImportUrl() {
+  const base = (
+    process.env.EXPO_PUBLIC_SUPABASE_URL
+    || process.env.SUPABASE_URL
+    || ''
+  ).replace(/\/$/, '');
+  if (!base) return '';
+  return `${base}/functions/v1/import-video-job`;
+}
+
+function buildShareViewControllerSource(scheme, groupId) {
+  const templatePath = path.join(__dirname, 'templates', 'ShareViewController.memo-trip.swift');
+  const template = fs.readFileSync(templatePath, 'utf8');
+  const resolvedScheme = Array.isArray(scheme) ? scheme[0] : scheme;
+  return template
+    .replaceAll('<GROUPIDENTIFIER>', groupId)
+    .replaceAll('<SCHEME>', resolvedScheme || 'memo-trip')
+    .replaceAll('<SUPABASE_IMPORT_URL>', getSupabaseImportUrl())
+    .replaceAll(
+      '<SUPABASE_ANON_KEY>',
+      process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY || '',
+    );
 }
 
 /**
- * After expo-share-intent writes ShareViewController.swift, replace it with the Memo Trip
- * version that POSTs supported video URLs to Supabase Edge Functions (Option 3) so the user
- * can stay in Instagram. Auth token is synced from the host app via App Group UserDefaults.
+ * Replaces expo-share-intent's ShareViewController with Memo Trip direct-import flow.
+ * Must run after the expo-share-intent plugin in app.config.js.
  */
-function withShareExtensionDirectImport(config, shareIntentParams = {}) {
+function withShareExtensionDirectImport(config) {
   return withDangerousMod(config, [
     'ios',
     async (cfg) => {
+      const bundleId = cfg.ios?.bundleIdentifier || 'com.tentzer.memotrip';
+      const groupId = `group.${bundleId}`;
+      const scheme = cfg.scheme || 'memo-trip';
       const platformRoot = cfg.modRequest.platformProjectRoot;
-      const bundleId = cfg.ios?.bundleIdentifier;
-      if (!bundleId) {
-        console.warn('[withShareExtensionDirectImport] Missing ios.bundleIdentifier.');
-        return cfg;
-      }
+      const targetPath = path.join(platformRoot, SHARE_EXT_FOLDER, VIEW_CONTROLLER);
 
-      const appGroup = shareIntentParams.iosAppGroupIdentifier || `group.${bundleId}`;
-      const schemeRaw = cfg.scheme;
-      const scheme = Array.isArray(schemeRaw) ? schemeRaw[0] : schemeRaw;
-      if (!scheme) {
-        console.warn('[withShareExtensionDirectImport] Missing scheme; skipping ShareViewController override.');
-        return cfg;
-      }
-
-      const supabaseUrl = (process.env.EXPO_PUBLIC_SUPABASE_URL || '').replace(/\/$/, '');
-      const anonKey = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY || '';
-      const importUrl = supabaseUrl ? `${supabaseUrl}/functions/v1/import-video-job` : '';
-
-      if (!supabaseUrl || !anonKey) {
+      if (!fs.existsSync(path.dirname(targetPath))) {
         console.warn(
-          '[withShareExtensionDirectImport] Missing EXPO_PUBLIC_SUPABASE_URL or EXPO_PUBLIC_SUPABASE_ANON_KEY at prebuild. ' +
-          'The share extension will compile with empty endpoint and fall back to opening the host app. ' +
-          'Set these env vars (EAS profile env or local shell) before building.'
+          '[withShareExtensionDirectImport] ShareExtension folder not found; run prebuild with expo-share-intent first.',
         );
-      } else {
-        console.log('[withShareExtensionDirectImport] endpoint =', importUrl);
-      }
-
-      const extFolder = getShareExtensionFolderName(shareIntentParams.iosShareExtensionName);
-      const templatePath = path.join(__dirname, 'templates', 'ShareViewController.memo-trip.swift');
-
-      if (!fs.existsSync(templatePath)) {
-        console.warn('[withShareExtensionDirectImport] Template missing:', templatePath);
         return cfg;
       }
 
-      let swift = fs.readFileSync(templatePath, 'utf8');
-      swift = swift
-        .replaceAll('<GROUPIDENTIFIER>', appGroup)
-        .replaceAll('<SCHEME>', scheme)
-        .replaceAll('<SUPABASE_IMPORT_URL>', importUrl)
-        .replaceAll('<SUPABASE_ANON_KEY>', anonKey);
-
-      const dest = path.join(platformRoot, extFolder, 'ShareViewController.swift');
-      await fs.promises.mkdir(path.dirname(dest), { recursive: true });
-      await fs.promises.writeFile(dest, swift);
-      console.log('[withShareExtensionDirectImport] Wrote ShareViewController.swift for', extFolder);
+      const source = buildShareViewControllerSource(scheme, groupId);
+      fs.writeFileSync(targetPath, source, 'utf8');
+      console.log('[withShareExtensionDirectImport] Wrote', targetPath);
       return cfg;
     },
   ]);
 }
 
-module.exports = withShareExtensionDirectImport;
+module.exports = createRunOncePlugin(
+  withShareExtensionDirectImport,
+  'with-share-extension-direct-import',
+  '1.0.0',
+);

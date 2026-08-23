@@ -1,5 +1,6 @@
 import { useImportQueue } from '@/context/ImportQueueContext';
 import { extractShareVideoUrl } from '@/lib/extractShareVideoUrl';
+import { consumeDirectImportHandoff } from '@/lib/shareExtensionAuthSync';
 import { useShareIntentContext } from 'expo-share-intent';
 import { useRootNavigationState, useRouter } from 'expo-router';
 import { useEffect, useRef } from 'react';
@@ -11,7 +12,7 @@ type ShareIntentHandlerProps = {
 
 export default function ShareIntentHandler({ appReady }: ShareIntentHandlerProps) {
     const { isReady, hasShareIntent, shareIntent, resetShareIntent } = useShareIntentContext();
-    const { enqueueUrl } = useImportQueue();
+    const { enqueueUrl, refreshJobs } = useImportQueue();
     const router = useRouter();
     const rootNavigationState = useRootNavigationState();
     const handledKeyRef = useRef<string | null>(null);
@@ -25,9 +26,16 @@ export default function ShareIntentHandler({ appReady }: ShareIntentHandlerProps
         if (handledKeyRef.current === key) return;
         handledKeyRef.current = key;
 
+        const handoffUrl = consumeDirectImportHandoff();
+        if (url && handoffUrl && handoffUrl === url) {
+            void refreshJobs();
+            resetShareIntent();
+            return;
+        }
+
         if (url) {
             enqueueUrl(url);
-            router.navigate('/onboarding/Home');
+            router.navigate('/onboarding/video-import');
         } else {
             router.navigate('/onboarding/video-import');
         }
@@ -40,6 +48,7 @@ export default function ShareIntentHandler({ appReady }: ShareIntentHandlerProps
         shareIntent,
         resetShareIntent,
         enqueueUrl,
+        refreshJobs,
         router,
         rootNavigationState?.key,
     ]);

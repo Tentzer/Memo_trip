@@ -1,0 +1,235 @@
+Handoff: iOS Share Extension — Direct Reel Import (Memo Trip)
+=============================================================
+
+Copy this file into a new Cursor chat on your Mac to continue this work.
+
+-----------------------------------------------------------------------------
+FEATURE GOAL
+-----------------------------------------------------------------------------
+
+When a user shares an Instagram/TikTok/Facebook reel from the iOS share sheet
+to Memo Trip:
+
+1. The share extension POSTs the URL to Supabase import-video-job using the
+   user's JWT.
+2. Show alert: "The reel is being imported."
+3. User taps OK and stays in Instagram (main app does not open).
+4. Job runs server-side; when user opens Memo Trip later, the job appears on
+   the Import tab.
+
+Fallback path: If direct import fails (no token, network error, etc.),
+extension can still deep-link into the app; ShareIntentHandler enqueues the URL
+unless a direct-import handoff was consumed.
+
+Cannot test in Expo Go — requires a dev build with native share extension +
+App Groups.
+
+-----------------------------------------------------------------------------
+ARCHITECTURE (HIGH LEVEL)
+-----------------------------------------------------------------------------
+
+Instagram Share Sheet
+  -> iOS Share Extension (ShareViewController.swift)
+      -> reads JWT from App Group UserDefaults (key: memoTripSupabaseAccessToken)
+      -> POST { url } to SUPABASE_URL/functions/v1/import-video-job
+      -> alert + dismiss (no app open on success)
+
+Main app (on sign-in)
+  -> AuthContext calls setShareExtensionAccessToken(access_token)
+  -> memo-share-extension-auth native module writes same App Group key
+
+Main app (on cold start / share fallback)
+  -> ShareIntentHandler: consumeDirectImportHandoff() — if URL present, skip
+     navigate/enqueue
+  -> ImportQueueContext polls/refreshes video_import_jobs from Supabase
+
+App Group ID (hardcoded in native + template): group.com.tentzer.memotrip
+Bundle ID: com.tentzer.memotrip
+Scheme: memo-trip
+
+-----------------------------------------------------------------------------
+KEY FILES
+-----------------------------------------------------------------------------
+
+Purpose                              | Path
+-------------------------------------|------------------------------------------
+Expo config plugins                  | app.config.js
+                                     |   expo-share-intent +
+                                     |   ./plugins/withShareExtensionDirectImport
+Share extension Swift template       | plugins/templates/ShareViewController.memo-trip.swift
+Prebuild: inject template + URL/key  | plugins/withShareExtensionDirectImport.js
+Local Expo native module             | modules/memo-share-extension-auth/
+JS bridge                            | modules/memo-share-extension-auth/index.ts
+Swift module                         | modules/memo-share-extension-auth/ios/MemoShareExtensionAuthModule.swift
+Re-exports                           | lib/shareExtensionAuthSync.ts
+Sync token on session                | context/AuthContext.tsx
+Skip duplicate enqueue               | components/ShareIntentHandler.tsx
+Import UI + dev banner               | app/onboarding/video-import.tsx
+Import queue / Realtime              | context/ImportQueueContext.tsx
+Edge function                        | supabase/functions/import-video-job/index.ts
+DB table                             | migrations *video_import_jobs*
+Dependencies                         | package.json:
+                                     |   expo-share-intent
+                                     |   memo-share-extension-auth (file:./modules/...)
+Patches                              | patches/expo-share-intent+5.1.1.patch
+                                     | patches/xcode+3.0.1.patch
+                                     | postinstall: patch-package
+
+Generated on Mac (not in git):
+  ios/ShareExtension/ShareViewController.swift
+  (written at prebuild from template)
+
+-----------------------------------------------------------------------------
+AUTH MECHANISM (CRITICAL)
+-----------------------------------------------------------------------------
+
+- JWT is NOT stored in Supabase for the extension.
+- It lives in iOS App Group UserDefaults(suiteName: "group.com.tentzer.memotrip"),
+  key: memoTripSupabaseAccessToken.
+- Main app writes via native MemoShareExtensionAuth.setAccessToken.
+- Share extension reads the same key in Swift (shareExtensionAuthKey).
+
+Dev-only UI: On Import tab (video-import.tsx), in __DEV__ + iOS, banner shows:
+  - "Share extension auth: ready" — token in App Group
+  - "Share extension auth: missing — sign in once" — token not readable
+
+Important: App sign-in (Supabase session) != share extension auth. The banner
+checks App Group only. setShareExtensionAccessToken silently no-ops if:
+
+1. Native module MemoShareExtensionAuth not linked in Xcode build, or
+2. Main app target lacks App Groups entitlement for group.com.tentzer.memotrip, or
+3. Build predates hasAccessToken in native module (banner always false).
+
+-----------------------------------------------------------------------------
+MAC BUILD STEPS (REQUIRED)
+-----------------------------------------------------------------------------
+
+  npm install
+  npx expo prebuild --clean
+  cd ios && pod install
+
+Open ios/MemoTrip.xcworkspace (not .xcodeproj).
+
+Ensure .env / .env.local has:
+  EXPO_PUBLIC_SUPABASE_URL
+  EXPO_PUBLIC_SUPABASE_ANON_KEY
+
+Build to physical iPhone from Xcode (or npx expo run:ios).
+
+Xcode checks:
+  - Main app target -> Signing & Capabilities -> App Groups ->
+    group.com.tentzer.memotrip (checked)
+  - Share Extension target -> same App Group
+  - After code changes: Clean Build, delete app from device, reinstall,
+    sign in again
+
+withShareExtensionDirectImport needs EXPO_PUBLIC_SUPABASE_URL (and anon key)
+AT PREBUILD TIME so the Swift template gets the correct import-video-job
+endpoint baked in.
+
+-----------------------------------------------------------------------------
+TEST PROCEDURE
+-----------------------------------------------------------------------------
+
+1. Rebuild + install + sign in.
+2. Import tab -> dev banner should say "ready"
+   (if still "missing", fix build/entitlements before sharing).
+3. Instagram -> reel -> Share -> Memo Trip.
+4. Success: alert "The reel is being imported." -> OK -> stay in Instagram.
+5. Open Memo Trip -> Import tab -> job: Analyzing video... -> places.
+
+Verify in Supabase SQL:
+
+  select j.id, j.url, j.status, j.created_at
+  from public.video_import_jobs j
+  join auth.users u on u.id = j.user_id
+  where u.email = 'YOUR_EMAIL'
+  order by j.created_at desc
+  limit 5;
+
+-----------------------------------------------------------------------------
+FAILURE SIGNALS
+-----------------------------------------------------------------------------
+
+Symptom: Banner "missing" after sign-in
+  Likely: Native module not linked, App Groups missing on main app, stale ios/
+
+Symptom: Extension "Sign in required"
+  Likely: Same — JWT never written to App Group
+
+Symptom: App opens to map/import
+  Likely: Extension fell back to deep link; direct import failed
+
+Symptom: Alert OK but no job
+  Likely: Edge function error; check Supabase logs for import-video-job
+          (401 = expired JWT -> re-sign in)
+
+Symptom: withShareExtensionDirectImport warning in prebuild
+  Likely: Run prebuild with expo-share-intent first so ios/ShareExtension/ exists
+
+-----------------------------------------------------------------------------
+CURRENT BLOCKER (FROM LAST TEST)
+-----------------------------------------------------------------------------
+
+User built from Xcode, signed in, but Import tab shows:
+  "Share extension auth: missing — sign in once"
+
+Most likely fixes on Mac:
+  1. npm install (ensure memo-share-extension-auth in node_modules)
+  2. npx expo prebuild --clean + pod install
+  3. Confirm App Groups on MAIN app target (not only extension)
+  4. Rebuild, reinstall, sign out/in
+
+Do not trust Expo Go for this feature.
+
+-----------------------------------------------------------------------------
+RELATED APP CODE (SAME FEATURE)
+-----------------------------------------------------------------------------
+
+  lib/extractShareVideoUrl.ts       — URL patterns
+  hooks/useVideoImport.ts           — client enqueue (if used)
+  lib/videoImportApi.ts             — API client
+  components/ImportCandidateCard.tsx
+  types/videoImport.ts
+
+-----------------------------------------------------------------------------
+OTHER WORK IN SAME REPO (BRIEF — NOT SHARE EXTENSION)
+-----------------------------------------------------------------------------
+
+  - Map: showMemoriesOnMap toggle + MemoriesMapLoadOverlay
+  - Delete: RPC delete_owned_memory (hard vs soft delete)
+  - Import queue: Realtime filter user_id=eq.<id>, quieter network errors
+  - Login: Sign Up link
+
+-----------------------------------------------------------------------------
+SUGGESTED NEXT STEPS
+-----------------------------------------------------------------------------
+
+1. Fix "share extension auth: missing" on Mac (prebuild + App Groups + native
+   module linked).
+2. Run full reel share test; confirm video_import_jobs row + Import tab UI.
+3. If direct import works, optionally remove or gate dev banner for production.
+4. Android background share + toast is NOT implemented (iOS-only path).
+
+-----------------------------------------------------------------------------
+SUPABASE
+-----------------------------------------------------------------------------
+
+  Project ref (from prior session): rvxbupuzvrupdenxbbzl
+  Edge function: import-video-job
+  Table: video_import_jobs
+
+-----------------------------------------------------------------------------
+AGENT INSTRUCTIONS FOR CONTINUATION
+-----------------------------------------------------------------------------
+
+  - Read plugins/templates/ShareViewController.memo-trip.swift,
+    context/AuthContext.tsx, modules/memo-share-extension-auth/, app.config.js
+    before changing anything.
+  - Do not use fallbacks to mask missing App Groups — fix entitlements /
+    prebuild / native linking.
+  - User tests on physical iPhone via Xcode on Mac.
+  - Prior conversation transcript (if needed):
+    agent-transcripts/830ac0fa-7bb0-4b06-906c-53c133b366e1.jsonl
+
+End of handoff.

@@ -1,15 +1,23 @@
 const { AndroidConfig } = require('expo/config-plugins');
 
 /**
- * Injects Maps SDK metadata for react-native-maps (PROVIDER_GOOGLE) on Android.
- * Set EXPO_PUBLIC_GOOGLE_MAPS_API_KEY for EAS/local builds so it exists at prebuild time.
+ * Injects Google Maps keys for react-native-maps at prebuild (Android + iOS).
+ * Set EXPO_PUBLIC_GOOGLE_MAPS_API_KEY for EAS/local builds.
  * @see https://docs.expo.dev/versions/latest/sdk/map-view/
  */
 module.exports = ({ config }) => {
   const googleMapsApiKey = process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY ?? '';
+  const bundleId = config.ios?.bundleIdentifier ?? 'com.tentzer.memotrip';
 
   return {
     ...config,
+    ios: {
+      ...config.ios,
+      config: {
+        ...config.ios?.config,
+        googleMapsApiKey,
+      },
+    },
     android: {
       ...config.android,
       config: {
@@ -19,6 +27,21 @@ module.exports = ({ config }) => {
         },
       },
     },
-    plugins: [...(config.plugins ?? []), AndroidConfig.GoogleMapsApiKey.withGoogleMapsApiKey],
+    plugins: [
+      ...(config.plugins ?? []),
+      AndroidConfig.GoogleMapsApiKey.withGoogleMapsApiKey,
+      [
+        'expo-share-intent',
+        {
+          iosActivationRules: {
+            NSExtensionActivationSupportsText: true,
+            NSExtensionActivationSupportsWebURLWithMaxCount: 1,
+            NSExtensionActivationSupportsWebPageWithMaxCount: 1,
+          },
+          iosAppGroupIdentifier: `group.${bundleId}`,
+        },
+      ],
+      './plugins/withShareExtensionDirectImport',
+    ],
   };
 };

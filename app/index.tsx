@@ -1,31 +1,25 @@
 import { useAuth } from "@/context/AuthContext";
-import { Link, router } from "expo-router";
+import { useAppTheme } from "@/context/ThemeContext";
+import { AppSplash } from "@/components/AppSplash";
+import { Link } from "expo-router";
 import LottieView from 'lottie-react-native';
-import React, { useEffect, useRef } from 'react';
+import React, { useCallback, useRef, useState } from 'react';
 import { ActivityIndicator, Text, TouchableOpacity, View } from 'react-native';
 
 export default function HomeScreen() {
     const animation = useRef<LottieView>(null);
     const auth = useAuth();
+    const { theme } = useAppTheme();
+    const [previewSplash, setPreviewSplash] = useState(false);
 
-    useEffect(() => {
-        if (!auth.loading && auth.user) {
-            router.replace('/onboarding/Home');
-        }
-    }, [auth.user, auth.loading]);
-
-    if (auth.loading) {
-        return (
-            <View className="flex-1 justify-center items-center bg-slate-700">
-                <ActivityIndicator size="large" color="#93C5FD" />
-            </View>
-        );
+    if (auth.loading || auth.user) {
+        return <View style={{ flex: 1, backgroundColor: theme.colors.background }} />;
     }
 
     return (
-        <View className="flex-1 justify-between items-center bg-slate-700 py-10">
+        <View className="flex-1 justify-between items-center py-10" style={{ backgroundColor: theme.colors.background }}>
             <View>
-                <Text className="px-6 text-5xl text-blue-200 shadow-lg font-bold mt-10 text-center">
+                <Text className="px-6 text-5xl shadow-lg font-bold mt-10 text-center" style={{ color: theme.colors.accentText }}>
                     Hi! Welcome to MemoTrip
                 </Text>
             </View>
@@ -54,7 +48,23 @@ export default function HomeScreen() {
                         <Text className="text-white text-lg font-bold text-center">Sign Up</Text>
                     </TouchableOpacity>
                 </Link>
+
+                {__DEV__ && (
+                    <TouchableOpacity
+                        onPress={() => setPreviewSplash(true)}
+                        className="mt-4 py-2 w-60 rounded-xl border"
+                        style={{ borderColor: theme.colors.border }}
+                    >
+                        <Text className="text-center text-sm" style={{ color: theme.colors.textMuted }}>
+                            [DEV] Preview Splash
+                        </Text>
+                    </TouchableOpacity>
+                )}
             </View>
+
+            {previewSplash && (
+                <AppSplash onDone={() => setPreviewSplash(false)} />
+            )}
         </View>
     );
 }

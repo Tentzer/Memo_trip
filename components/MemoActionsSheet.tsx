@@ -1,8 +1,10 @@
 import { type Memory } from '@/context/MemoryContext';
+import { useAppTheme } from '@/context/ThemeContext';
 import { Ionicons } from '@expo/vector-icons';
+import BottomSheet, { BottomSheetBackdrop, BottomSheetView } from '@gorhom/bottom-sheet';
 import { Image as ExpoImage } from 'expo-image';
-import React from 'react';
-import { Modal, Pressable, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import React, { useCallback, useEffect, useMemo, useRef } from 'react';
+import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 
 interface Props {
     visible: boolean;
@@ -27,13 +29,16 @@ function ActionButton({
     onPress: () => void;
     destructive?: boolean;
 }) {
+    const { theme } = useAppTheme();
+    const styles = React.useMemo(() => createStyles(theme.colors), [theme.colors]);
+
     return (
         <TouchableOpacity
             onPress={onPress}
             style={[styles.actionButton, destructive && styles.destructiveButton]}
             activeOpacity={0.85}
         >
-            <Ionicons name={icon} size={18} color={destructive ? '#b91c1c' : '#0f172a'} />
+            <Ionicons name={icon} size={18} color={destructive ? theme.colors.danger : theme.colors.text} />
             <Text style={[styles.actionLabel, destructive && styles.destructiveLabel]}>{label}</Text>
         </TouchableOpacity>
     );
@@ -50,24 +55,42 @@ export default function MemoActionsSheet({
     onDelete,
     deleteLabel = 'Delete',
 }: Props) {
-    if (!visible || !memory) return null;
+    const { theme } = useAppTheme();
+    const styles = useMemo(() => createStyles(theme.colors), [theme.colors]);
+    const bottomSheetRef = useRef<BottomSheet>(null);
 
-    const title = memory.title?.trim() || memory.country || 'Memo';
-    const subtitle = memory.description?.trim() || 'Choose what you want to do with this memo.';
+    useEffect(() => {
+        if (visible && memory) {
+            bottomSheetRef.current?.expand();
+        } else {
+            bottomSheetRef.current?.close();
+        }
+    }, [visible, memory]);
+
+    const renderBackdrop = useCallback(
+        (props: Parameters<typeof BottomSheetBackdrop>[0]) => (
+            <BottomSheetBackdrop {...props} disappearsOnIndex={-1} appearsOnIndex={0} pressBehavior="close" />
+        ),
+        [],
+    );
+
+    const title = memory?.title?.trim() || memory?.country || 'Memo';
+    const subtitle = memory?.description?.trim() || 'Choose what you want to do with this memo.';
 
     return (
-        <Modal
-            visible={visible}
-            transparent={true}
-            animationType="slide"
-            onRequestClose={onClose}
+        <BottomSheet
+            ref={bottomSheetRef}
+            index={-1}
+            enableDynamicSizing
+            enablePanDownToClose
+            onClose={onClose}
+            backdropComponent={renderBackdrop}
+            handleIndicatorStyle={styles.handleIndicator}
+            backgroundStyle={styles.sheetBackground}
+            style={styles.sheetContainer}
         >
-            <View style={styles.overlay}>
-                <Pressable style={styles.backdrop} onPress={onClose} />
-
-                <View style={styles.sheet} onStartShouldSetResponder={() => true}>
-                    <View style={styles.handle} />
-
+            {memory ? (
+                <BottomSheetView style={styles.sheetContent}>
                     <View style={styles.previewRow}>
                         <ExpoImage
                             source={{ uri: memory.uri }}
@@ -75,7 +98,6 @@ export default function MemoActionsSheet({
                             contentFit="cover"
                             cachePolicy="memory-disk"
                         />
-
                         <View style={styles.previewText}>
                             <Text style={styles.title} numberOfLines={1}>
                                 {title}
@@ -93,45 +115,39 @@ export default function MemoActionsSheet({
                         {!memory.isShared ? (
                             <>
                                 <ActionButton icon="share-social-outline" label="Share" onPress={onShare} />
-                                <ActionButton icon="trash-outline" label={deleteLabel} onPress={onDelete} destructive />
+                                <ActionButton
+                                    icon="trash-outline"
+                                    label={deleteLabel}
+                                    onPress={onDelete}
+                                    destructive
+                                />
                             </>
                         ) : null}
                     </View>
-                </View>
-            </View>
-        </Modal>
+                </BottomSheetView>
+            ) : null}
+        </BottomSheet>
     );
 }
 
-const styles = StyleSheet.create({
-    overlay: {
-        ...StyleSheet.absoluteFillObject,
+type ThemeColors = ReturnType<typeof useAppTheme>['theme']['colors'];
+
+const createStyles = (colors: ThemeColors) => StyleSheet.create({
+    sheetContainer: {
         zIndex: 950,
-        justifyContent: 'flex-end',
     },
-    backdrop: {
-        ...StyleSheet.absoluteFillObject,
-        backgroundColor: 'rgba(15, 23, 42, 0.28)',
-    },
-    sheet: {
-        backgroundColor: 'white',
+    sheetBackground: {
+        backgroundColor: colors.surface,
         borderTopLeftRadius: 24,
         borderTopRightRadius: 24,
-        paddingHorizontal: 18,
-        paddingTop: 12,
-        paddingBottom: 28,
-        shadowColor: '#0f172a',
-        shadowOpacity: 0.12,
-        shadowRadius: 16,
-        elevation: 12,
     },
-    handle: {
+    handleIndicator: {
         width: 44,
-        height: 5,
-        borderRadius: 999,
-        backgroundColor: '#cbd5e1',
-        alignSelf: 'center',
-        marginBottom: 16,
+        backgroundColor: colors.handle,
+    },
+    sheetContent: {
+        paddingHorizontal: 18,
+        paddingBottom: 28,
     },
     previewRow: {
         flexDirection: 'row',
@@ -141,7 +157,7 @@ const styles = StyleSheet.create({
         width: 64,
         height: 64,
         borderRadius: 18,
-        backgroundColor: '#e2e8f0',
+        backgroundColor: colors.surfaceMuted,
     },
     previewText: {
         flex: 1,
@@ -150,13 +166,13 @@ const styles = StyleSheet.create({
     title: {
         fontSize: 17,
         fontWeight: '800',
-        color: '#0f172a',
+        color: colors.text,
     },
     subtitle: {
         marginTop: 4,
         fontSize: 13,
         lineHeight: 18,
-        color: '#64748b',
+        color: colors.textMuted,
     },
     actionsGrid: {
         flexDirection: 'row',
@@ -175,20 +191,20 @@ const styles = StyleSheet.create({
         paddingHorizontal: 14,
         paddingVertical: 13,
         borderRadius: 16,
-        backgroundColor: '#eff6ff',
+        backgroundColor: colors.accentSoft,
         borderWidth: 1,
-        borderColor: '#dbeafe',
+        borderColor: colors.border,
     },
     actionLabel: {
         fontSize: 14,
         fontWeight: '700',
-        color: '#0f172a',
+        color: colors.text,
     },
     destructiveButton: {
-        backgroundColor: '#fef2f2',
-        borderColor: '#fecaca',
+        backgroundColor: colors.dangerSoft,
+        borderColor: colors.danger,
     },
     destructiveLabel: {
-        color: '#b91c1c',
+        color: colors.danger,
     },
 });

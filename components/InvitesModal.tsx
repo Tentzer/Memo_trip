@@ -1,4 +1,5 @@
 import { type PendingInvite, useMemories } from '@/context/MemoryContext';
+import { useAppTheme } from '@/context/ThemeContext';
 import { Ionicons } from '@expo/vector-icons';
 import { Image as ExpoImage } from 'expo-image';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
@@ -27,6 +28,8 @@ function formatInviteDate(createdAt: string): string {
 }
 
 export default function InvitesModal({ visible, onClose }: InvitesModalProps) {
+    const { theme } = useAppTheme();
+    const styles = useMemo(() => createStyles(theme.colors), [theme.colors]);
     const {
         pendingInvites,
         invitesLoading,
@@ -120,7 +123,7 @@ export default function InvitesModal({ visible, onClose }: InvitesModalProps) {
                         />
                     ) : (
                         <View style={[styles.previewImage, styles.libraryFallback]}>
-                            <Ionicons name="folder-open-outline" size={28} color="#475569" />
+                            <Ionicons name="folder-open-outline" size={28} color={theme.colors.textMuted} />
                         </View>
                     )}
 
@@ -148,7 +151,7 @@ export default function InvitesModal({ visible, onClose }: InvitesModalProps) {
                         style={[styles.declineButton, isBusy && styles.disabledButton]}
                     >
                         {isDeclining ? (
-                            <ActivityIndicator size="small" color="#475569" />
+                            <ActivityIndicator size="small" color={theme.colors.textMuted} />
                         ) : (
                             <Text style={styles.declineButtonText}>Decline</Text>
                         )}
@@ -182,7 +185,7 @@ export default function InvitesModal({ visible, onClose }: InvitesModalProps) {
             <SafeAreaView style={styles.screen}>
                 <View style={styles.header}>
                     <TouchableOpacity onPress={onClose} style={styles.backButton}>
-                        <Ionicons name="chevron-back" size={22} color="#2563eb" />
+                        <Ionicons name="chevron-back" size={22} color={theme.colors.accent} />
                     </TouchableOpacity>
                     <View style={styles.headerText}>
                         <Text style={styles.title}>Invites</Text>
@@ -192,7 +195,7 @@ export default function InvitesModal({ visible, onClose }: InvitesModalProps) {
 
                 {invitesLoading && pendingInvites.length === 0 ? (
                     <View style={styles.loadingState}>
-                        <ActivityIndicator size="large" color="#2563eb" />
+                        <ActivityIndicator size="large" color={theme.colors.accent} />
                         <Text style={styles.loadingText}>Loading invites...</Text>
                     </View>
                 ) : (
@@ -206,7 +209,7 @@ export default function InvitesModal({ visible, onClose }: InvitesModalProps) {
                         }
                         ListEmptyComponent={
                             <View style={styles.emptyState}>
-                                <Ionicons name="mail-open-outline" size={40} color="#94a3b8" />
+                                <Ionicons name="mail-open-outline" size={40} color={theme.colors.textMuted} />
                                 <Text style={styles.emptyTitle}>No pending invites</Text>
                                 <Text style={styles.emptyText}>
                                     When someone shares a memo or library with you, it will appear here.
@@ -220,10 +223,12 @@ export default function InvitesModal({ visible, onClose }: InvitesModalProps) {
     );
 }
 
-const styles = StyleSheet.create({
+type ThemeColors = ReturnType<typeof useAppTheme>['theme']['colors'];
+
+const createStyles = (colors: ThemeColors) => StyleSheet.create({
     screen: {
         flex: 1,
-        backgroundColor: '#f8fafc',
+        backgroundColor: colors.background,
     },
     header: {
         flexDirection: 'row',
@@ -236,11 +241,11 @@ const styles = StyleSheet.create({
         width: 42,
         height: 42,
         borderRadius: 21,
-        backgroundColor: 'white',
+        backgroundColor: colors.surface,
         alignItems: 'center',
         justifyContent: 'center',
         borderWidth: 1,
-        borderColor: '#dbe4ea',
+        borderColor: colors.border,
     },
     headerText: {
         marginLeft: 14,
@@ -248,12 +253,12 @@ const styles = StyleSheet.create({
     title: {
         fontSize: 24,
         fontWeight: '800',
-        color: '#0f172a',
+        color: colors.text,
     },
     subtitle: {
         marginTop: 4,
         fontSize: 14,
-        color: '#64748b',
+        color: colors.textMuted,
     },
     loadingState: {
         flex: 1,
@@ -262,7 +267,7 @@ const styles = StyleSheet.create({
     },
     loadingText: {
         marginTop: 12,
-        color: '#64748b',
+        color: colors.textMuted,
         fontSize: 15,
     },
     listContent: {
@@ -271,10 +276,10 @@ const styles = StyleSheet.create({
         gap: 14,
     },
     card: {
-        backgroundColor: 'white',
+        backgroundColor: colors.surface,
         borderRadius: 22,
         padding: 16,
-        shadowColor: '#000',
+        shadowColor: colors.shadow,
         shadowOpacity: 0.06,
         shadowRadius: 10,
         elevation: 2,
@@ -298,11 +303,11 @@ const styles = StyleSheet.create({
     typeBadgeText: {
         fontSize: 12,
         fontWeight: '700',
-        color: '#334155',
+        color: colors.textSecondary,
     },
     dateText: {
         fontSize: 12,
-        color: '#94a3b8',
+        color: colors.textMuted,
     },
     cardBody: {
         flexDirection: 'row',
@@ -312,7 +317,7 @@ const styles = StyleSheet.create({
         width: 74,
         height: 74,
         borderRadius: 18,
-        backgroundColor: '#e2e8f0',
+        backgroundColor: colors.surfaceMuted,
     },
     libraryFallback: {
         alignItems: 'center',
@@ -326,17 +331,17 @@ const styles = StyleSheet.create({
     cardTitle: {
         fontSize: 16,
         fontWeight: '700',
-        color: '#0f172a',
+        color: colors.text,
     },
     cardSubtitle: {
         marginTop: 6,
         fontSize: 14,
-        color: '#475569',
+        color: colors.textSecondary,
     },
     cardMeta: {
         marginTop: 6,
         fontSize: 13,
-        color: '#64748b',
+        color: colors.textMuted,
     },
     cardActions: {
         flexDirection: 'row',
@@ -349,11 +354,11 @@ const styles = StyleSheet.create({
         paddingHorizontal: 16,
         paddingVertical: 11,
         borderRadius: 14,
-        backgroundColor: '#e2e8f0',
+        backgroundColor: colors.surfaceMuted,
         alignItems: 'center',
     },
     declineButtonText: {
-        color: '#475569',
+        color: colors.textSecondary,
         fontWeight: '700',
     },
     acceptButton: {
@@ -378,7 +383,7 @@ const styles = StyleSheet.create({
     },
     emptyState: {
         alignItems: 'center',
-        backgroundColor: 'white',
+        backgroundColor: colors.surface,
         borderRadius: 24,
         padding: 28,
     },
@@ -386,12 +391,12 @@ const styles = StyleSheet.create({
         marginTop: 14,
         fontSize: 18,
         fontWeight: '700',
-        color: '#0f172a',
+        color: colors.text,
     },
     emptyText: {
         marginTop: 8,
         fontSize: 14,
-        color: '#64748b',
+        color: colors.textMuted,
         textAlign: 'center',
         lineHeight: 21,
     },
