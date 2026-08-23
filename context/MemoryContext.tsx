@@ -1,12 +1,14 @@
-import React, { createContext, useContext, useEffect, useRef, useState, useCallback, useMemo } from 'react';
-import { useAuth } from './AuthContext';
-import { Memory, CustomFolder } from '@/types/memory';
-import { loadUserMemories } from '@/lib/memoryApi';
-import { useMemoryCRUD } from '@/hooks/useMemoryCRUD';
 import { useLibraries } from '@/hooks/useLibraries';
+import { useMemoryCRUD } from '@/hooks/useMemoryCRUD';
 import { useSharing } from '@/hooks/useSharing';
+import { loadUserMemories } from '@/lib/memoryApi';
+import { InviteActionResult, PendingInvite } from '@/types/invites';
+import { CustomFolder, Memory } from '@/types/memory';
+import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
+import { useAuth } from './AuthContext';
 
-export type { Memory, CustomFolder } from '@/types/memory';
+export type { PendingInvite } from '@/types/invites';
+export type { CustomFolder, Memory } from '@/types/memory';
 
 interface MemoryContextType {
     memories: Memory[];
@@ -18,16 +20,28 @@ interface MemoryContextType {
         lat: number,
         lng: number,
         country: string,
-        description?: string
+        description?: string,
+        title?: string,
+        options?: { customFolderIds?: string[] }
     ) => Promise<void>;
     deleteMemory: (id: string) => void;
     updateMemoryInfo: (memoryId: string, title: string, description: string) => Promise<void>;
     createCustomFolder: (folderName: string) => Promise<{ success: boolean; message?: string }>;
     removeLibrary: (folderId: string) => Promise<{ success: boolean; message?: string }>;
     toggleMemoryInCustomFolder: (memoryId: string, folderId: string) => Promise<void>;
+    updateCustomFolderCover: (folderId: string) => Promise<{ success: boolean; message?: string }>;
     getLibraryMemories: (folderId: string) => Memory[];
     handleShareSubmit: (user_email: string, selectedMemory: Memory | null) => Promise<void>;
     shareCustomFolder: (user_email: string, folderId: string) => Promise<void>;
+    grantLibraryEditAccess: (user_email: string, folderId: string) => Promise<void>;
+    pendingInvites: PendingInvite[];
+    invitesLoading: boolean;
+    reloadMemories: () => Promise<void>;
+    refreshPendingInvites: () => Promise<void>;
+    acceptMemoInvite: (inviteId: string) => Promise<InviteActionResult>;
+    declineMemoInvite: (inviteId: string) => Promise<InviteActionResult>;
+    acceptLibraryInvite: (inviteId: string, libraryId: string) => Promise<InviteActionResult>;
+    declineLibraryInvite: (inviteId: string) => Promise<InviteActionResult>;
 }
 
 const MemoryContext = createContext<MemoryContextType | undefined>(undefined);
@@ -41,9 +55,11 @@ export function MemoryProvider({ children }: { children: React.ReactNode }) {
 
     const memoriesRef = useRef<Memory[]>([]);
     const customFoldersRef = useRef<CustomFolder[]>([]);
+    const sharedLibraryMemoriesByLibraryIdRef = useRef<Record<string, Memory[]>>({});
 
     useEffect(() => { memoriesRef.current = memories; }, [memories]);
     useEffect(() => { customFoldersRef.current = customFolders; }, [customFolders]);
+    useEffect(() => { sharedLibraryMemoriesByLibraryIdRef.current = sharedLibraryMemoriesByLibraryId; }, [sharedLibraryMemoriesByLibraryId]);
 
     const reloadMemories = useCallback(async () => {
         if (!user?.id) return;
@@ -69,13 +85,11 @@ export function MemoryProvider({ children }: { children: React.ReactNode }) {
         setMemories,
     });
 
-    const { getLibraryMemories, createCustomFolder, removeLibrary, toggleMemoryInCustomFolder } = useLibraries({
+    const { getLibraryMemories, createCustomFolder, removeLibrary, toggleMemoryInCustomFolder, updateCustomFolderCover } = useLibraries({
         user,
-        memories,
-        customFolders,
-        sharedLibraryMemoriesByLibraryId,
         memoriesRef,
         customFoldersRef,
+        sharedLibraryMemoriesByLibraryIdRef,
         setMemories,
         setCustomFolders,
         setSharedLibraryMemoriesByLibraryId,
@@ -90,7 +104,19 @@ export function MemoryProvider({ children }: { children: React.ReactNode }) {
         });
     }, [sharedLibraryMemoriesByLibraryId]);
 
-    const { handleShareSubmit, shareCustomFolder, checkForIncomingShares } = useSharing({
+    const {
+        pendingInvites,
+        invitesLoading,
+        refreshPendingInvites,
+        handleShareSubmit,
+        shareCustomFolder,
+        grantLibraryEditAccess,
+        acceptMemoInvite,
+        declineMemoInvite,
+        acceptLibraryInvite,
+        declineLibraryInvite,
+        checkForIncomingShares,
+    } = useSharing({
         user,
         customFoldersRef,
         getLibraryMemories,
@@ -99,7 +125,7 @@ export function MemoryProvider({ children }: { children: React.ReactNode }) {
 
     useEffect(() => {
         if (user) checkForIncomingShares();
-    }, [user]);
+    }, [user, checkForIncomingShares]);
 
     const contextValue = useMemo<MemoryContextType>(() => ({
         memories,
@@ -112,14 +138,25 @@ export function MemoryProvider({ children }: { children: React.ReactNode }) {
         createCustomFolder,
         removeLibrary,
         toggleMemoryInCustomFolder,
+        updateCustomFolderCover,
         getLibraryMemories,
         handleShareSubmit,
         shareCustomFolder,
+        grantLibraryEditAccess,
+        pendingInvites,
+        invitesLoading,
+        reloadMemories,
+        refreshPendingInvites,
+        acceptMemoInvite,
+        declineMemoInvite,
+        acceptLibraryInvite,
+        declineLibraryInvite,
     }), [
         memories, sharedLibraryMemories, customFolders,
         addMemory, addPlaceMemory, deleteMemory, updateMemoryInfo,
-        createCustomFolder, removeLibrary, toggleMemoryInCustomFolder, getLibraryMemories,
-        handleShareSubmit, shareCustomFolder,
+        createCustomFolder, removeLibrary, toggleMemoryInCustomFolder, updateCustomFolderCover, getLibraryMemories,
+        handleShareSubmit, shareCustomFolder, grantLibraryEditAccess, pendingInvites, invitesLoading, reloadMemories, refreshPendingInvites,
+        acceptMemoInvite, declineMemoInvite, acceptLibraryInvite, declineLibraryInvite,
     ]);
 
     return (

@@ -1,12 +1,12 @@
-import { useCallback } from 'react';
-import * as ImagePicker from 'expo-image-picker';
-import * as Location from 'expo-location';
-import { User } from '@supabase/supabase-js';
+import { getCountryNameFromCoords, normalizeLocationFolderName } from '@/lib/geocoding';
+import { uploadPicture } from '@/lib/memoryApi';
+import { loadMemoryMeta, saveMemoryMeta } from '@/lib/memoryStorage';
 import { supabase } from '@/lib/supabase';
 import { Memory } from '@/types/memory';
-import { loadMemoryMeta, saveMemoryMeta } from '@/lib/memoryStorage';
-import { getCountryNameFromCoords } from '@/lib/geocoding';
-import { uploadPicture } from '@/lib/memoryApi';
+import { User } from '@supabase/supabase-js';
+import * as ImagePicker from 'expo-image-picker';
+import * as Location from 'expo-location';
+import { useCallback } from 'react';
 
 interface Params {
     user: User | null;
@@ -14,9 +14,15 @@ interface Params {
     setMemories: React.Dispatch<React.SetStateAction<Memory[]>>;
 }
 
+interface AddPlaceMemoryOptions {
+    customFolderIds?: string[];
+}
+
 export function useMemoryCRUD({ user, memoriesRef, setMemories }: Params) {
 
     const addMemory = useCallback(async (): Promise<void> => {
+
+        if (!user?.id) return;
         const cameraPermission = await ImagePicker.requestCameraPermissionsAsync();
         const locationPermission = await Location.requestForegroundPermissionsAsync();
 
@@ -55,7 +61,6 @@ export function useMemoryCRUD({ user, memoriesRef, setMemories }: Params) {
             });
         }
 
-        if (!user?.id) return;
         const result = await uploadPicture(photoUri, lat, lng, tempId, country, user.id);
         if (result) {
             setMemories(prev => prev.map(m =>
@@ -69,21 +74,27 @@ export function useMemoryCRUD({ user, memoriesRef, setMemories }: Params) {
         lat: number,
         lng: number,
         country: string,
-        description?: string
+        description?: string,
+        title?: string,
+        options?: AddPlaceMemoryOptions
     ): Promise<void> => {
         if (!user?.id) return;
 
         const tempId = Date.now().toString();
         const trimmedDescription = description?.trim();
+        const trimmedTitle = title?.trim();
+        const displayCountry = normalizeLocationFolderName(country);
+        const customFolderIds = options?.customFolderIds ?? [];
         const localMemory: Memory = {
             id: tempId,
             uri: photoUri,
             latitude: lat,
             longitude: lng,
             created_at: new Date().toISOString(),
-            country,
+            country: displayCountry,
+            title: trimmedTitle || undefined,
             description: trimmedDescription || undefined,
-            customFolderIds: [],
+            customFolderIds,
         };
 
         setMemories(prev => [...prev, localMemory]);
@@ -92,48 +103,84 @@ export function useMemoryCRUD({ user, memoriesRef, setMemories }: Params) {
         await saveMemoryMeta(user.id, {
             ...storedMeta,
             [tempId]: {
-                country,
-                title: undefined,
+                country: displayCountry,
+                title: trimmedTitle || undefined,
                 description: trimmedDescription || undefined,
-                customFolderIds: [],
+                customFolderIds,
                 excludeFromCountryFolder: false,
             },
         });
 
-        const result = await uploadPicture(photoUri, lat, lng, tempId, country, user.id, {
+        const result = await uploadPicture(photoUri, lat, lng, tempId, displayCountry, user.id, {
+            title: trimmedTitle,
             description: trimmedDescription,
         });
         if (result) {
+            let persistedFolderIds = customFolderIds;
+            let folderInsertErrorMessage: string | null = null;
+
+            if (customFolderIds.length > 0) {
+                const { error: folderInsertError } = await supabase
+                    .from('library_memos')
+                    .insert(customFolderIds.map(folderId => ({
+                        library_id: folderId,
+                        memo_id: result.persistedId,
+                        added_by: user.id,
+                    })));
+
+                if (folderInsertError) {
+                    persistedFolderIds = [];
+                    folderInsertErrorMessage = folderInsertError.message;
+                    const latestMeta = await loadMemoryMeta(user.id);
+                    await saveMemoryMeta(user.id, {
+                        ...latestMeta,
+                        [result.persistedId]: {
+                            ...(latestMeta[result.persistedId] ?? {
+                                country: displayCountry,
+                                title: trimmedTitle || undefined,
+                                description: trimmedDescription || undefined,
+                                excludeFromCountryFolder: false,
+                            }),
+                            customFolderIds: [],
+                        },
+                    });
+                }
+            }
+
             setMemories(prev => prev.map(m =>
-                m.id === tempId ? { ...m, id: result.persistedId, uri: result.publicUrl } : m
+                m.id === tempId
+                    ? { ...m, id: result.persistedId, uri: result.publicUrl, customFolderIds: persistedFolderIds }
+                    : m
             ));
+
+            if (folderInsertErrorMessage) {
+                throw new Error(folderInsertErrorMessage);
+            }
         }
     }, [user, setMemories]);
 
     const deleteMemory = useCallback(async (memoryID: string): Promise<void> => {
+        if (!user?.id) return;
         const memoryToDelete = memoriesRef.current.find(m => m.id === memoryID);
-        if (!memoryToDelete) return;
+        if (!memoryToDelete || memoryToDelete.deletedAt) return;
 
-        setMemories(prev => prev.filter(m => m.id !== memoryID));
+        const archivedAt = new Date().toISOString();
 
-        if (user?.id) {
-            const storedMeta = await loadMemoryMeta(user.id);
-            const nextMeta = { ...storedMeta };
-            delete nextMeta[memoryID];
-            await saveMemoryMeta(user.id, nextMeta);
-        }
+        setMemories(prev => prev.map(memory =>
+            memory.id === memoryID
+                ? { ...memory, deletedAt: archivedAt }
+                : memory
+        ));
 
-        const { error: dbError } = await supabase.from('memories').delete().eq('id', memoryID);
+        // Hard delete is intentionally reserved for a separate purge flow because shared libraries
+        // still reference the canonical memo row and storage object.
+        const { error: dbError } = await supabase
+            .from('memories')
+            .update({ deleted_at: archivedAt })
+            .eq('id', memoryID)
+            .eq('user_id', user.id);
         if (dbError) {
-            console.error('DB delete failed:', dbError.message);
-        }
-
-        const fileName = memoryToDelete.uri.split('/').pop();
-        if (fileName) {
-            const { error: storageError } = await supabase.storage.from('memories').remove([fileName]);
-            if (storageError) {
-                console.error('Storage cleanup failed:', storageError.message);
-            }
+            console.error('Memo archive failed:', dbError.message);
         }
     }, [user, memoriesRef, setMemories]);
 

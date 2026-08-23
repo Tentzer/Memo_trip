@@ -1,0 +1,79 @@
+---
+description: Expo / React Native / TypeScript conventions
+globs: "**/*.{ts,tsx}"
+alwaysApply: false
+---
+
+## Project Stack
+
+- Expo 54 with expo-router (file-based routing in `app/`)
+- React Native 0.81 + TypeScript 5.9
+- NativeWind 4 (Tailwind CSS utility classes for React Native)
+- Supabase for auth, database, and storage
+- react-native-maps, react-native-reanimated, @gorhom/bottom-sheet
+
+## Component Patterns
+
+- Use functional components exclusively
+- Name components in PascalCase; file name matches the default export
+- Keep components focused: one primary responsibility per file
+- Extract reusable UI into `components/`, screen-specific logic stays in `app/`
+- Destructure props; define prop shapes with TypeScript `interface` or `type`
+
+## Hooks
+
+- Prefer built-in hooks (`useState`, `useEffect`, `useCallback`, `useMemo`, `useRef`)
+- Extract shared stateful logic into custom hooks under `hooks/`
+- Always specify dependency arrays; avoid missing or over-broad deps
+- Use `useCallback` for callbacks passed to child components or FlatList renderers
+
+## Styling (NativeWind)
+
+- Use NativeWind `className` strings as the primary styling method
+- For dynamic or computed styles, use `style` prop with conditional Tailwind classes
+- Avoid raw `StyleSheet.create` unless NativeWind cannot express the style
+- Keep Tailwind config in `tailwind.config.js`; extend theme there, not inline
+
+## Navigation (expo-router)
+
+- Screens live in `app/`; layouts in `_layout.tsx` files
+- Use `<Link>` and `router.push()` / `router.replace()` for navigation
+- Group related screens with route groups `(group)/`
+- Use typed routes when available
+
+## Supabase Integration
+
+- Access Supabase client through a shared singleton (`lib/supabase.ts` or similar)
+- Handle auth state with Supabase listeners, not manual polling
+- Always handle errors from Supabase calls; never silently ignore `.error`
+- Keep row-level security (RLS) policies in Supabase; don't replicate authorization in app code
+
+## TypeScript
+
+- Enable strict mode; avoid `any` and `as` casts unless truly necessary
+- Define types for API responses, navigation params, and shared data shapes
+- Co-locate types with the module that owns them; shared types go in `types/`
+
+## Lists & Performance
+
+- Use `FlatList` or `SectionList` for dynamic lists, never `.map()` inside ScrollView
+- Provide stable `keyExtractor` values; avoid array index as key
+- Memoize expensive list item renderers with `React.memo`
+
+## Error Handling
+
+- Wrap async operations in try/catch; surface errors to the user via alerts or toasts
+- Use error boundaries for unexpected render failures
+- Log errors with enough context for debugging (screen name, params)
+
+## File Organization
+
+```
+app/           Screens and layouts (expo-router)
+components/    Reusable UI components
+hooks/         Custom hooks
+lib/           Utilities, Supabase client, helpers
+types/         Shared TypeScript types
+assets/        Images, fonts, Lottie animations
+constants/     App-wide constants and config
+```

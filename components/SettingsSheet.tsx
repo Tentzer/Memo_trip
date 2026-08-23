@@ -14,6 +14,8 @@ interface Props {
     showMemories: boolean;
     setShowMemories: React.Dispatch<React.SetStateAction<boolean>>;
     onOpenGallery: () => void;
+    onOpenMarketplace: () => void;
+    onOpenInvites: () => void;
     onLogout: () => void;
 }
 
@@ -23,10 +25,14 @@ const SettingsSheet = forwardRef<SettingsSheetRef, Props>(({
     showMemories,
     setShowMemories,
     onOpenGallery,
+    onOpenMarketplace,
+    onOpenInvites,
     onLogout,
 }, ref) => {
     const bottomSheetRef = useRef<BottomSheet>(null);
     const snapPoints = useMemo(() => ['45%'], []);
+    // Stores the action to run after the close animation fully completes.
+    const pendingActionRef = useRef<(() => void) | null>(null);
 
     useImperativeHandle(ref, () => ({
         open: () => bottomSheetRef.current?.expand(),
@@ -37,6 +43,13 @@ const SettingsSheet = forwardRef<SettingsSheetRef, Props>(({
         <BottomSheetBackdrop {...props} disappearsOnIndex={-1} appearsOnIndex={0} />
     ), []);
 
+    // Called by Reanimated via runOnJS once the sheet reaches index -1.
+    const handleSheetClose = useCallback(() => {
+        const action = pendingActionRef.current;
+        pendingActionRef.current = null;
+        action?.();
+    }, []);
+
     return (
         <BottomSheet
             ref={bottomSheetRef}
@@ -44,6 +57,8 @@ const SettingsSheet = forwardRef<SettingsSheetRef, Props>(({
             snapPoints={snapPoints}
             enablePanDownToClose={true}
             backdropComponent={renderBackdrop}
+            onClose={handleSheetClose}
+            animationConfigs={{ duration: 250 }}
             handleIndicatorStyle={{ backgroundColor: '#cbd5e1', width: 40 }}
             backgroundStyle={{ backgroundColor: 'white', borderRadius: 30 }}
         >
@@ -67,7 +82,7 @@ const SettingsSheet = forwardRef<SettingsSheetRef, Props>(({
                 <View style={styles.row}>
                     <View style={styles.rowLeft}>
                         <Ionicons name="image" size={24} color="#228B22" />
-                        <Text style={styles.rowText}>Memo Saves</Text>
+                        <Text style={styles.rowText}>Show Memos on Map</Text>
                     </View>
                     <Switch
                         trackColor={{ false: '#767577', true: '#735e21' }}
@@ -78,8 +93,8 @@ const SettingsSheet = forwardRef<SettingsSheetRef, Props>(({
 
                 <TouchableOpacity
                     onPress={() => {
+                        pendingActionRef.current = onOpenGallery;
                         bottomSheetRef.current?.close();
-                        onOpenGallery();
                     }}
                     style={styles.row}
                 >
@@ -93,6 +108,45 @@ const SettingsSheet = forwardRef<SettingsSheetRef, Props>(({
                 <TouchableOpacity
                     style={styles.row}
                     onPress={() => {
+                        pendingActionRef.current = onOpenMarketplace;
+                        bottomSheetRef.current?.close();
+                    }}
+                >
+                    <View style={styles.rowLeft}>
+                        <Ionicons name="storefront-outline" size={24} color="#2563eb" />
+                        <Text style={styles.rowText}>Marketplace</Text>
+                    </View>
+                    <Ionicons name="chevron-forward" size={20} color="#cbd5e1" />
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                    style={styles.row}
+                    onPress={() => {
+                        pendingActionRef.current = onOpenInvites;
+                        bottomSheetRef.current?.close();
+                    }}
+                >
+                    <View style={styles.rowLeft}>
+                        <Ionicons name="mail-unread-outline" size={24} color="#7c3aed" />
+                        <Text style={styles.rowText}>Invites</Text>
+                    </View>
+                    <Ionicons name="chevron-forward" size={20} color="#cbd5e1" />
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                    style={styles.row}
+                    onPress={() => alert('Coming soon!')}
+                >
+                    <View style={styles.rowLeft}>
+                        <Ionicons name="person-circle-outline" size={24} color="#3B82F6" />
+                        <Text style={styles.rowText}>Account</Text>
+                    </View>
+                    <Ionicons name="chevron-forward" size={20} color="#cbd5e1" />
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                    style={[styles.row, { borderBottomWidth: 0 }]}
+                    onPress={() => {
                         bottomSheetRef.current?.close();
                         onLogout();
                     }}
@@ -103,16 +157,6 @@ const SettingsSheet = forwardRef<SettingsSheetRef, Props>(({
                     </View>
                 </TouchableOpacity>
 
-                <TouchableOpacity
-                    style={[styles.row, { borderBottomWidth: 0 }]}
-                    onPress={() => alert('Coming soon!')}
-                >
-                    <View style={styles.rowLeft}>
-                        <Ionicons name="person-circle-outline" size={24} color="#3B82F6" />
-                        <Text style={styles.rowText}>Account</Text>
-                    </View>
-                    <Ionicons name="chevron-forward" size={20} color="#cbd5e1" />
-                </TouchableOpacity>
             </BottomSheetView>
         </BottomSheet>
     );

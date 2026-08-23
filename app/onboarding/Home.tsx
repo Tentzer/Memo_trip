@@ -1,4 +1,7 @@
+import InvitesModal from '@/components/InvitesModal';
 import LibraryModal from '@/components/LibraryModal';
+import MarketPlaceModal from '@/components/MarketPlaceModal';
+import MemoActionsSheet from '@/components/MemoActionsSheet';
 import MemoInfoModal from '@/components/MemoInfoModal';
 import PlaceDescriptionModal from '@/components/PlaceDescriptionModal';
 import SearchBar from '@/components/SearchBar';
@@ -10,7 +13,7 @@ import { type Memory, useMemories } from '@/context/MemoryContext';
 import { useMapLogic } from '@/hooks/useMapLogic';
 import { Ionicons } from '@expo/vector-icons';
 import { Image as ExpoImage } from 'expo-image';
-import { router } from 'expo-router';
+import { router, useLocalSearchParams } from 'expo-router';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
     ActivityIndicator,
@@ -41,9 +44,7 @@ type MapMemoryMarkerProps = {
 
 function MapMemoryMarker({ memory, variant, index, onMarkerPress }: MapMemoryMarkerProps) {
     const [tracksViewChanges, setTracksViewChanges] = useState(true);
-    const rotation = index % 2 === 0 ? 2 : -2;
-    const borderClass =
-        variant === 'owned' ? 'border border-gray-200' : 'border-2 border-blue-400';
+    const accentColor = variant === 'owned' ? '#1d4ed8' : '#2563eb';
 
     return (
         <Marker
@@ -54,18 +55,33 @@ function MapMemoryMarker({ memory, variant, index, onMarkerPress }: MapMemoryMar
             onPress={() => onMarkerPress(memory)}
             tracksViewChanges={tracksViewChanges}
         >
-            <View
-                style={[styles.markerContainer, { transform: [{ rotate: `${rotation}deg` }] }]}
-                className={`p-1 pb-4 bg-white ${borderClass}`}
-            >
-                <ExpoImage
-                    source={{ uri: memory.uri }}
-                    style={{ width: 56, height: 56, backgroundColor: '#f3f4f6' }}
-                    contentFit="cover"
-                    cachePolicy="memory-disk"
-                    onLoad={() => setTracksViewChanges(false)}
-                    onError={() => setTracksViewChanges(false)}
-                />
+            <View style={styles.markerPinWrapper}>
+                <View
+                    style={[
+                        styles.markerContainer,
+                        styles.markerAvatarOuter,
+                        {
+                            borderColor: variant === 'shared' ? '#7c3aed' : 'transparent',
+                            borderWidth: variant === 'shared' ? 3 : 0,
+                            backgroundColor: variant === 'shared' ? 'white' : 'transparent',
+                            width: variant === 'shared' ? 68 : 58,
+                            height: variant === 'shared' ? 68 : 58,
+                            borderRadius: variant === 'shared' ? 34 : 29,
+                        },
+                    ]}
+                >
+                    <View style={[styles.markerAccentRing, { borderColor: accentColor }]}>
+                        <ExpoImage
+                            source={{ uri: memory.uri }}
+                            style={styles.markerAvatarImage}
+                            contentFit="cover"
+                            cachePolicy="memory-disk"
+                            onLoad={() => setTracksViewChanges(false)}
+                            onError={() => setTracksViewChanges(false)}
+                        />
+                    </View>
+                </View>
+                <View style={[styles.markerStem, { backgroundColor: accentColor }]} />
             </View>
         </Marker>
     );
@@ -80,26 +96,39 @@ export default function MapScreen() {
         addPlaceMemory,
         handleShareSubmit,
         shareCustomFolder,
+        grantLibraryEditAccess,
         removeLibrary,
         createCustomFolder,
         toggleMemoryInCustomFolder,
+        updateCustomFolderCover,
         updateMemoryInfo,
-        getLibraryMemories,
+        reloadMemories,
     } = useMemories();
     const auth = useAuth();
 
     const [isInfoModalVisible, setIsInfoModalVisible] = useState(false);
     const [selectedMemoryForInfo, setSelectedMemoryForInfo] = useState<Memory | null>(null);
+    const [selectedMemoryForActions, setSelectedMemoryForActions] = useState<Memory | null>(null);
     const [activeMapLibraryFilter, setActiveMapLibraryFilter] = useState<{
         id: string;
         type: 'country' | 'custom';
         name: string;
     } | null>(null);
     const [markerRenderVersion, setMarkerRenderVersion] = useState(0);
+    const [isInvitesVisible, setIsInvitesVisible] = useState(false);
+    const [isMarketplaceVisible, setIsMarketplaceVisible] = useState(false);
 
     const openMemoInfo = useCallback((memory: Memory) => {
         setSelectedMemoryForInfo(memory);
         setIsInfoModalVisible(true);
+    }, []);
+
+    const openMemoActions = useCallback((memory: Memory) => {
+        setSelectedMemoryForActions(memory);
+    }, []);
+
+    const closeMemoActions = useCallback(() => {
+        setSelectedMemoryForActions(null);
     }, []);
 
     const closeMemoInfo = useCallback(() => {
@@ -121,13 +150,13 @@ export default function MapScreen() {
         isAddingPlace, isNoPhotoDescriptionVisible, missingPhotoDescription,
         setSearchQuery, setMapMoved, fetchPlaces, handleSelectPlace, setShareEmail,
         getPlaceRoute, openDrivingInWaze, handleMarkerPress, returnToStartingPoint,
-        setIsShareMemoryVisible, setIsDarkMode,
+        setIsShareMemoryVisible, setIsDarkMode, setMemoryToShare,
         setShowRoute, setShowSearchBar, setUserChoseAddress, setRouteDistance,
         setDestinationLongitude, setDestinationLatitude, setShowMemories, setIsGalleryVisible,
         jumpToLocation, handleClearSearch, addSelectedPlaceAsMemory,
         setMissingPhotoDescription, closeNoPhotoDescriptionPrompt,
         saveNoPhotoPlaceWithoutDescription, saveNoPhotoPlaceWithDescription,
-    } = useMapLogic(deleteMemory, addPlaceMemory, openMemoInfo);
+    } = useMapLogic(addPlaceMemory, openMemoActions);
 
     const settingsSheetRef = useRef<SettingsSheetRef>(null);
 
@@ -143,22 +172,79 @@ export default function MapScreen() {
         setIsGalleryVisible(false);
     }, [setShowMemories, setIsGalleryVisible]);
 
+    const handleOpenInfoFromActions = useCallback(() => {
+        if (!selectedMemoryForActions) return;
+        const targetMemory = selectedMemoryForActions;
+        closeMemoActions();
+        openMemoInfo(targetMemory);
+    }, [closeMemoActions, openMemoInfo, selectedMemoryForActions]);
+
+    const handleWalkToMemo = useCallback(async () => {
+        if (!selectedMemoryForActions) return;
+        const targetMemory = selectedMemoryForActions;
+        closeMemoActions();
+        setShowSearchBar(false);
+        await returnToStartingPoint();
+        const ok = await getPlaceRoute(targetMemory.latitude, targetMemory.longitude);
+        if (ok) {
+            setShowRoute(true);
+        } else {
+            setShowSearchBar(true);
+        }
+    }, [closeMemoActions, getPlaceRoute, returnToStartingPoint, selectedMemoryForActions, setShowRoute, setShowSearchBar]);
+
+    const handleDriveToMemo = useCallback(() => {
+        if (!selectedMemoryForActions) return;
+        const targetMemory = selectedMemoryForActions;
+        closeMemoActions();
+        void openDrivingInWaze(targetMemory.latitude, targetMemory.longitude);
+    }, [closeMemoActions, openDrivingInWaze, selectedMemoryForActions]);
+
+    const handleShareMemoFromActions = useCallback(() => {
+        if (!selectedMemoryForActions || selectedMemoryForActions.isShared) return;
+        setMemoryToShare(selectedMemoryForActions);
+        setShareEmail('');
+        closeMemoActions();
+        setIsShareMemoryVisible(true);
+    }, [closeMemoActions, selectedMemoryForActions, setIsShareMemoryVisible, setMemoryToShare, setShareEmail]);
+
+    const handleDeleteMemoFromActions = useCallback(() => {
+        if (!selectedMemoryForActions || selectedMemoryForActions.isShared) return;
+        const targetMemory = selectedMemoryForActions;
+        Alert.alert(
+            'Archive memo',
+            'This removes the memo from your main map and country folders, but keeps it available in any libraries that still include it.',
+            [
+                { text: 'Cancel', style: 'cancel' },
+                {
+                    text: 'Delete',
+                    style: 'destructive',
+                    onPress: () => {
+                        closeMemoActions();
+                        deleteMemory(targetMemory.id);
+                    },
+                },
+            ]
+        );
+    }, [closeMemoActions, deleteMemory, selectedMemoryForActions]);
+
     const isPlaceAlreadySaved = useMemo(() => {
         if (!userChoseAddress || destinationLatitude === 0) return false;
-        return [...memories, ...sharedLibraryMemories].some(m =>
-            Math.abs(m.latitude - destinationLatitude) < 0.0005 &&
-            Math.abs(m.longitude - destinationLongitude) < 0.0005
+        return [...memories.filter(memory => !memory.deletedAt), ...sharedLibraryMemories].some(m =>
+            Math.abs(m.latitude - destinationLatitude) < 0.00005 &&
+            Math.abs(m.longitude - destinationLongitude) < 0.00005
         );
     }, [memories, sharedLibraryMemories, destinationLatitude, destinationLongitude, userChoseAddress]);
 
     const visibleOwnedMemories = useMemo(() => {
-        if (!activeMapLibraryFilter) return memories;
+        if (!activeMapLibraryFilter) return memories.filter(memory => !memory.deletedAt);
         if (activeMapLibraryFilter.type === 'custom') {
             return memories.filter(memory =>
                 (memory.customFolderIds ?? []).includes(activeMapLibraryFilter.id)
             );
         }
         return memories.filter(memory =>
+            !memory.deletedAt &&
             !memory.excludeFromCountryFolder &&
             (memory.country || 'Unknown Location') === activeMapLibraryFilter.name
         );
@@ -180,6 +266,17 @@ export default function MapScreen() {
     useEffect(() => {
         returnToStartingPoint();
     }, [returnToStartingPoint]);
+
+    const { focusLat, focusLng } = useLocalSearchParams<{ focusLat?: string; focusLng?: string }>();
+
+    useEffect(() => {
+        if (!focusLat || !focusLng) return;
+        const lat = parseFloat(focusLat);
+        const lng = parseFloat(focusLng);
+        if (Number.isFinite(lat) && Number.isFinite(lng)) {
+            jumpToLocation(lat, lng);
+        }
+    }, [focusLat, focusLng, jumpToLocation]);
 
     if (loading) {
         return (
@@ -384,16 +481,33 @@ export default function MapScreen() {
                 )}
             </View>
 
+            <MemoActionsSheet
+                visible={selectedMemoryForActions !== null}
+                memory={selectedMemoryForActions}
+                onClose={closeMemoActions}
+                onOpenInfo={handleOpenInfoFromActions}
+                onStartWalkingRoute={() => {
+                    void handleWalkToMemo();
+                }}
+                onOpenDrivingRoute={handleDriveToMemo}
+                onShare={handleShareMemoFromActions}
+                onDelete={handleDeleteMemoFromActions}
+                deleteLabel="Delete"
+            />
+
             <LibraryModal
                 visible={isGalleryVisible}
                 onClose={() => setIsGalleryVisible(false)}
                 memories={memories}
+                sharedLibraryMemories={sharedLibraryMemories}
                 customFolders={customFolders}
                 createCustomFolder={createCustomFolder}
                 removeLibrary={removeLibrary}
                 shareCustomFolder={shareCustomFolder}
+                grantLibraryEditAccess={grantLibraryEditAccess}
+                addPlaceMemory={addPlaceMemory}
                 toggleMemoryInCustomFolder={toggleMemoryInCustomFolder}
-                getLibraryMemories={getLibraryMemories}
+                updateCustomFolderCover={updateCustomFolderCover}
                 jumpToLocation={jumpToLocation}
                 onShowFolderOnMap={handleShowFolderOnMap}
             />
@@ -432,10 +546,25 @@ export default function MapScreen() {
                 showMemories={showMemories}
                 setShowMemories={setShowMemories}
                 onOpenGallery={() => setIsGalleryVisible(true)}
+                onOpenMarketplace={() => setIsMarketplaceVisible(true)}
+                onOpenInvites={() => {
+                    settingsSheetRef.current?.close();
+                    setIsInvitesVisible(true);
+                }}
                 onLogout={() => {
                     auth.logout();
                     router.replace('/');
                 }}
+            />
+
+            <InvitesModal visible={isInvitesVisible} onClose={() => setIsInvitesVisible(false)} />
+            <MarketPlaceModal
+                visible={isMarketplaceVisible}
+                onClose={() => setIsMarketplaceVisible(false)}
+                userId={auth.user?.id}
+                customFolders={customFolders}
+                memories={memories}
+                reloadMemories={reloadMemories}
             />
         </View>
     );
@@ -458,6 +587,39 @@ const styles = StyleSheet.create({
         shadowOpacity: 0.3,
         shadowRadius: 4,
         elevation: 5,
+    },
+    markerPinWrapper: {
+        alignItems: 'center',
+    },
+    markerAvatarOuter: {
+        width: 68,
+        height: 68,
+        borderRadius: 34,
+        borderWidth: 3,
+        backgroundColor: 'white',
+        overflow: 'hidden',
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    markerAccentRing: {
+        width: 58,
+        height: 58,
+        borderRadius: 29,
+        borderWidth: 2,
+        overflow: 'hidden',
+        backgroundColor: 'transparent',
+    },
+    markerAvatarImage: {
+        width: '100%',
+        height: '100%',
+        borderRadius: 29,
+        backgroundColor: 'transparent',
+    },
+    markerStem: {
+        width: 3,
+        height: 16,
+        marginTop: -5,
+        borderRadius: 999,
     },
     recenterButton: {
         position: 'absolute',

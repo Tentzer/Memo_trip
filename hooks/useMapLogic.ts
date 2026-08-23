@@ -1,36 +1,34 @@
-import { useState, useRef, useCallback } from 'react';
-import { Keyboard, Alert, Linking } from 'react-native';
-import * as Location from 'expo-location';
-import MapView from 'react-native-maps';
-import { Memory } from '../context/MemoryContext';
-import { useAuth } from '../context/AuthContext';
-import { getFolderNameFromGoogleAddressComponents, type GoogleAddressComponent } from '@/lib/geocoding';
+import {
+    fetchGooglePlaceDetails,
+    fetchGooglePlacePredictions,
+    type PlacePrediction,
+} from '@/lib/googlePlaces';
 import { fetchWalkingRoutePreview } from '@/lib/routing';
+import * as Location from 'expo-location';
+import { useCallback, useRef, useState } from 'react';
+import { Alert, Keyboard, Linking } from 'react-native';
+import MapView from 'react-native-maps';
+import { useAuth } from '../context/AuthContext';
+import { Memory } from '../context/MemoryContext';
+
+export type { PlacePrediction };
 
 interface Coordinates {
     latitude: number;
     longitude: number;
 }
 
-export interface PlacePrediction {
-    place_id: string;
-    description: string;
-    structured_formatting: {
-        main_text: string;
-        secondary_text: string;
-    };
-}
-
 export const useMapLogic = (
-    deleteMemory: (id: string) => void,
     addPlaceMemory: (
         photoUri: string,
         lat: number,
         lng: number,
         country: string,
-        description?: string
+        description?: string,
+        title?: string,
+        options?: { customFolderIds?: string[] }
     ) => Promise<void>,
-    onInfoPress?: (memory: Memory) => void
+    onMarkerActionPress?: (memory: Memory) => void
 ) => {
 
     const mapRef = useRef<MapView>(null);
@@ -58,6 +56,7 @@ export const useMapLogic = (
     const [isAddingPlace, setIsAddingPlace] = useState(false);
     const [isNoPhotoDescriptionVisible, setIsNoPhotoDescriptionVisible] = useState(false);
     const [missingPhotoDescription, setMissingPhotoDescription] = useState('');
+    const [selectedPlaceTitle, setSelectedPlaceTitle] = useState<string | null>(null);
 
     const { user } = useAuth();
     const GOOGLE_API_KEY = process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY;
@@ -97,43 +96,31 @@ export const useMapLogic = (
             return;
         }
         try {
-            const response = await fetch(
-                `https://maps.googleapis.com/maps/api/place/autocomplete/json?input=${text}&key=${GOOGLE_API_KEY}`
-            );
-            const json = await response.json();
-            setSearchResults(json.predictions ?? []);
+            const predictions = await fetchGooglePlacePredictions(text, GOOGLE_API_KEY);
+            setSearchResults(predictions);
         } catch (error) {
             console.log(error);
         }
     }, [GOOGLE_API_KEY]);
 
     const handleSelectPlace = useCallback(async (placeId: string, description: string) => {
-        const response = await fetch(
-            `https://maps.googleapis.com/maps/api/place/details/json?place_id=${placeId}&fields=geometry,photos,address_components&key=${GOOGLE_API_KEY}`
-        );
-        const data = await response.json();
+        const place = await fetchGooglePlaceDetails(placeId, description, GOOGLE_API_KEY);
 
-        if (data.result?.geometry) {
-            const lat = data.result.geometry.location.lat;
-            const lng = data.result.geometry.location.lng;
-
-            const photoRef: string | null = data.result.photos?.[0]?.photo_reference ?? null;
-            const components = data.result.address_components as GoogleAddressComponent[] | undefined;
-            const folderName = getFolderNameFromGoogleAddressComponents(components) || null;
-
-            setSelectedPlacePhotoRef(photoRef);
-            setSelectedPlaceCountry(folderName);
+        if (place) {
+            setSelectedPlaceTitle(place.title);
+            setSelectedPlacePhotoRef(place.photoReference);
+            setSelectedPlaceCountry(place.country);
             setShowRoute(false);
-            setDestinationLatitude(lat);
-            setDestinationLongitude(lng);
+            setDestinationLatitude(place.latitude);
+            setDestinationLongitude(place.longitude);
             setSearchResults([]);
             setSearchQuery(description);
             setUserChoseAddress(true);
             Keyboard.dismiss();
 
             mapRef.current?.animateToRegion({
-                latitude: lat,
-                longitude: lng,
+                latitude: place.latitude,
+                longitude: place.longitude,
                 latitudeDelta: 0.01,
                 longitudeDelta: 0.01,
             }, 1000);
@@ -211,67 +198,8 @@ export const useMapLogic = (
         setDestinationLongitude(memory.longitude);
         setUserChoseAddress(false);
         setMemoryToShare(memory);
-
-        const routeOption = {
-            text: "Route",
-            style: "default" as const,
-            onPress: () => {
-                Alert.alert(
-                    'Choose route type',
-                    'How would you like to navigate?',
-                    [
-                        { text: 'Cancel', style: 'cancel' },
-                        {
-                            text: 'Walk',
-                            onPress: () => {
-                                void (async () => {
-                                    setShowSearchBar(false);
-                                    await returnToStartingPoint();
-                                    const ok = await getPlaceRoute(memory.latitude, memory.longitude);
-                                    if (ok) {
-                                        setShowRoute(true);
-                                    } else {
-                                        setShowSearchBar(true);
-                                    }
-                                })();
-                            },
-                        },
-                        {
-                            text: 'Drive with Waze',
-                            onPress: () => openDrivingInWaze(memory.latitude, memory.longitude),
-                        },
-                    ]
-                );
-            },
-        };
-
-        const infoOption = {
-            text: "Info",
-            onPress: () => onInfoPress?.(memory),
-        };
-
-        if (memory.isShared) {
-            Alert.alert("Memo Options", "What would you like to do?", [
-                { text: "Cancel", style: "cancel" },
-                routeOption,
-                infoOption,
-            ]);
-        } else {
-            Alert.alert("Memo Options", "What would you like to do?", [
-                { text: "Cancel", style: "cancel" },
-                { text: "Delete", onPress: () => deleteMemory(memory.id), style: "destructive" },
-                routeOption,
-                infoOption,
-                {
-                    text: "Share",
-                    onPress: () => {
-                        setIsShareMemoryVisible(true);
-                        setMemoryToShare(memory);
-                    },
-                },
-            ]);
-        }
-    }, [deleteMemory, getPlaceRoute, returnToStartingPoint, openDrivingInWaze, onInfoPress]);
+        onMarkerActionPress?.(memory);
+    }, [onMarkerActionPress]);
 
     const handleClearSearch = useCallback(() => {
         setSearchQuery('');
@@ -281,6 +209,7 @@ export const useMapLogic = (
         setSelectedPlaceCountry(null);
         setIsNoPhotoDescriptionVisible(false);
         setMissingPhotoDescription('');
+        setSelectedPlaceTitle(null);
     }, []);
 
     const saveSelectedPlaceMemory = useCallback(async (description?: string) => {
@@ -298,7 +227,7 @@ export const useMapLogic = (
 
         setIsAddingPlace(true);
         try {
-            await addPlaceMemory(photoUri, destinationLatitude, destinationLongitude, country, description);
+            await addPlaceMemory(photoUri, destinationLatitude, destinationLongitude, country, description, selectedPlaceTitle ?? undefined);
             Alert.alert('Memory saved!', 'The place has been added to your memories.');
             handleClearSearch();
         } catch {
@@ -313,6 +242,7 @@ export const useMapLogic = (
         destinationLatitude,
         destinationLongitude,
         GOOGLE_API_KEY,
+        selectedPlaceTitle,
         addPlaceMemory,
         handleClearSearch,
     ]);

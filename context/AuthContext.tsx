@@ -1,6 +1,8 @@
-import React, { createContext, useContext, useEffect, useState } from 'react';
 import { supabase } from '@/lib/supabase';
-import { User, Session } from '@supabase/supabase-js';
+import { refreshShareExtensionAuthToken, syncShareExtensionAuthToken } from '@/lib/shareExtensionAuthSync';
+import { Session, User } from '@supabase/supabase-js';
+import React, { createContext, useContext, useEffect, useState } from 'react';
+import { AppState, type AppStateStatus } from 'react-native';
 
 interface AuthContextType {
     user: User | null;
@@ -17,25 +19,43 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const [loading, setLoading] = useState(true);
 
     useEffect(() => {
-        // 1. Initial Session Check
+        // Initial Session Check
         supabase.auth.getSession().then(({ data: { session } }) => {
             setSession(session);
             setUser(session?.user ?? null);
+            syncShareExtensionAuthToken(session?.access_token ?? null);
             setLoading(false);
         });
 
-        // 2. Listen for Auth Changes (The "Watcher")
+        // Listen for Auth Changes
         const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
             setSession(session);
             setUser(session?.user ?? null);
+            syncShareExtensionAuthToken(session?.access_token ?? null);
             setLoading(false);
         });
 
         return () => subscription.unsubscribe();
     }, []);
 
-    // 3. The "Delegated" Logout Function
+    useEffect(() => {
+        syncShareExtensionAuthToken(session?.access_token ?? null);
+    }, [session?.access_token]);
+
+    // Keep the share extension token fresh whenever the app returns to foreground.
+    useEffect(() => {
+        const onAppStateChange = (nextState: AppStateStatus) => {
+            if (nextState === 'active') {
+                void refreshShareExtensionAuthToken();
+            }
+        };
+        const sub = AppState.addEventListener('change', onAppStateChange);
+        return () => sub.remove();
+    }, []);
+
+    // The "Delegated" Logout Function
     const logout = async () => {
+        syncShareExtensionAuthToken(null);
         setUser(null);
         setSession(null);
         const { error } = await supabase.auth.signOut();

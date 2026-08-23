@@ -4,6 +4,7 @@ export interface Memory {
     latitude: number;
     longitude: number;
     created_at: string;
+    deletedAt?: string | null;
     owner_id?: string;
     isShared?: boolean;
     country?: string;
@@ -18,8 +19,9 @@ export interface CustomFolder {
     name: string;
     created_at: string;
     owner_id: string;
-    role: 'owner' | 'viewer';
+    role: 'owner' | 'viewer' | 'editor';
     isShared: boolean;
+    coverImageUrl?: string | null;
 }
 
 export type MemoryMeta = Pick<Memory, 'country' | 'title' | 'description' | 'customFolderIds' | 'excludeFromCountryFolder'>;

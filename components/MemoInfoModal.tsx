@@ -1,11 +1,17 @@
 import { type Memory } from '@/context/MemoryContext';
-import { getFormattedAddressFromCoords } from '@/lib/geocoding';
+import {
+    getCachedFormattedAddressFromCoords,
+    getFormattedAddressFromCoords,
+} from '@/lib/geocoding';
 import { Ionicons } from '@expo/vector-icons';
 import { Image as ExpoImage } from 'expo-image';
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import {
     ActivityIndicator,
+    Alert,
+    InteractionManager,
     Keyboard,
+    Linking,
     Modal,
     Pressable,
     ScrollView,
@@ -19,7 +25,6 @@ import {
 interface Props {
     visible: boolean;
     memory: Memory | null;
-    /** When true (e.g. shared library viewer), fields are read-only. */
     readOnly?: boolean;
     onClose: () => void;
     onSave: (title: string, description: string) => void;
@@ -32,24 +37,45 @@ export default function MemoInfoModal({ visible, memory, readOnly = false, onClo
     const [addressLoading, setAddressLoading] = useState(false);
 
     useEffect(() => {
-        if (!visible || !memory) {
+        if (!memory) {
+            setMemoTitle('');
+            setMemoDescription('');
             setAddress('');
+            setAddressLoading(false);
             return;
         }
+
         setMemoTitle(memory.title ?? '');
         setMemoDescription(memory.description ?? '');
-        setAddressLoading(true);
-        setAddress('');
+
+        if (!visible) {
+            setAddress('');
+            setAddressLoading(false);
+            return;
+        }
+
+        const cachedAddress = getCachedFormattedAddressFromCoords(memory.latitude, memory.longitude);
+        setAddress(cachedAddress ?? '');
+        setAddressLoading(cachedAddress === null);
+
         let cancelled = false;
-        getFormattedAddressFromCoords(memory.latitude, memory.longitude).then((text) => {
-            if (!cancelled) {
-                setAddress(text);
-            }
-        }).finally(() => {
-            if (!cancelled) setAddressLoading(false);
-        });
+        const interactionTask = cachedAddress === null
+            ? InteractionManager.runAfterInteractions(() => {
+                getFormattedAddressFromCoords(memory.latitude, memory.longitude).then((text) => {
+                    if (!cancelled) {
+                        setAddress(text);
+                    }
+                }).finally(() => {
+                    if (!cancelled) {
+                        setAddressLoading(false);
+                    }
+                });
+            })
+            : null;
+
         return () => {
             cancelled = true;
+            interactionTask?.cancel();
         };
     }, [visible, memory]);
 
@@ -57,6 +83,28 @@ export default function MemoInfoModal({ visible, memory, readOnly = false, onClo
         Keyboard.dismiss();
         onClose();
     };
+
+    const handleOpenGoogleMaps = useCallback(async () => {
+        if (!memory) return;
+
+        const textQuery = [
+            memoTitle || memory.title,
+            address,
+            memory.country,
+        ]
+            .filter(value => value?.trim())
+            .join(', ');
+        const query = textQuery || `${memory.latitude},${memory.longitude}`;
+        const nativeUrl = `comgooglemaps://?q=${encodeURIComponent(query)}`;
+        const webUrl = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(query)}`;
+
+        try {
+            const canOpenGoogleMaps = await Linking.canOpenURL(nativeUrl);
+            await Linking.openURL(canOpenGoogleMaps ? nativeUrl : webUrl);
+        } catch {
+            Alert.alert('Could not open Google Maps', 'Please try again later.');
+        }
+    }, [address, memoTitle, memory]);
 
     const editable = !readOnly;
 
@@ -69,7 +117,7 @@ export default function MemoInfoModal({ visible, memory, readOnly = false, onClo
         >
             <View style={styles.overlay}>
                 <Pressable style={styles.backdropTap} onPress={handleClose} accessibilityRole="button" accessibilityLabel="Close" />
-                <View style={styles.sheet} onStartShouldSetResponder={() => true}>
+                <View style={styles.sheet}>
                     <View style={styles.handleBar} />
                     <Text style={styles.heading}>Memo details</Text>
                     <Text style={styles.lead}>
@@ -107,6 +155,23 @@ export default function MemoInfoModal({ visible, memory, readOnly = false, onClo
                                     {address || 'Address unavailable for this location.'}
                                 </Text>
                             )}
+                            {memory ? (
+                                <TouchableOpacity
+                                    onPress={handleOpenGoogleMaps}
+                                    style={styles.googleButton}
+                                >
+                                    <Ionicons name="navigate-outline" size={15} color="#2563eb" />
+                                    <Text style={styles.googleButtonText}>
+                                        <Text style={styles.googleBlue}>G</Text>
+                                        <Text style={styles.googleRed}>o</Text>
+                                        <Text style={styles.googleYellow}>o</Text>
+                                        <Text style={styles.googleBlue}>g</Text>
+                                        <Text style={styles.googleGreen}>l</Text>
+                                        <Text style={styles.googleRed}>e</Text>
+                                        <Text style={styles.googleMapsText}> Maps</Text>
+                                    </Text>
+                                </TouchableOpacity>
+                            ) : null}
                         </View>
 
                         <View style={styles.block}>
@@ -248,6 +313,37 @@ const styles = StyleSheet.create({
     addressLoading: {
         flexDirection: 'row',
         alignItems: 'center',
+    },
+    googleButton: {
+        alignSelf: 'flex-start',
+        marginTop: 10,
+        borderRadius: 999,
+        backgroundColor: '#eff6ff',
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: 6,
+        paddingHorizontal: 12,
+        paddingVertical: 7,
+    },
+    googleButtonText: {
+        fontSize: 13,
+        fontWeight: '700',
+    },
+    googleBlue: {
+        color: '#4285f4',
+    },
+    googleRed: {
+        color: '#ea4335',
+    },
+    googleYellow: {
+        color: '#fbbc05',
+    },
+    googleGreen: {
+        color: '#34a853',
+    },
+    googleMapsText: {
+        color: '#475569',
     },
     descriptionInput: {
         minHeight: 100,
