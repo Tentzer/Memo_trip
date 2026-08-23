@@ -3,8 +3,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { Image } from 'react-native';
 
 const PREFETCH_CONCURRENCY = 6;
-const REVEAL_CHUNK_SIZE = 25;
-const REVEAL_CHUNK_DELAY_MS = 48;
+const REVEAL_FLUSH_INTERVAL_MS = 48;
 
 export type MapMarkerListItem = {
     memory: Memory;
@@ -18,25 +17,25 @@ type Options = {
     showMemories: boolean;
 };
 
-function markerFingerprint(items: MapMarkerListItem[]): string {
-    return items.map(({ memory, variant }) => `${variant}:${memory.id}:${memory.uri}`).join('|');
-}
-
-async function prefetchImage(uri: string): Promise<boolean> {
+async function prefetchImage(uri: string): Promise<void> {
     const trimmed = uri.trim();
-    if (!trimmed) return false;
+    if (!trimmed) return;
     try {
         await Image.prefetch(trimmed);
-        return true;
     } catch {
-        return false;
+        // Marker still renders; RN Image falls back to loading directly.
     }
 }
 
 /**
- * Prefetches memo photos and reveals map markers in small batches so Google
+ * Prefetches memo photos and reveals map markers progressively so Google
  * Maps never snapshots hundreds of custom Marker views at once (which causes
  * missing pins and wrong cached bitmaps).
+ *
+ * The reveal is monotonic: once a marker is revealed it stays mounted until
+ * its memory leaves the list. Toggling visibility off simply hides markers
+ * without forgetting reveal state, so re-enabling is instant instead of
+ * replaying the whole prefetch/reveal wave (which looked like flickering).
  */
 export function useMapMemoryMarkerDisplay(
     ownedMemories: Memory[],
@@ -49,78 +48,64 @@ export function useMapMemoryMarkerDisplay(
         return [...owned, ...shared];
     }, [ownedMemories, sharedMemories]);
 
-    const fingerprint = useMemo(() => markerFingerprint(allItems), [allItems]);
-    const [readyIds, setReadyIds] = useState<Set<string>>(() => new Set());
-    const [revealCount, setRevealCount] = useState(0);
-    const prefetchRunRef = useRef(0);
+    const revealedIdsRef = useRef<Set<string>>(new Set());
+    const [revealVersion, setRevealVersion] = useState(0);
 
     const active = mapReady && showMemories;
 
+    // Forget markers whose memories were removed so their state is fresh if re-added.
     useEffect(() => {
-        if (!active) {
-            setReadyIds(new Set());
-            setRevealCount(0);
-            return;
-        }
-
-        const runId = ++prefetchRunRef.current;
-        const idsForRun = new Set(allItems.map(({ memory }) => memory.id));
-        const nextReady = new Set<string>();
-
-        const markReady = (memoryId: string) => {
-            if (prefetchRunRef.current !== runId) return;
-            if (!idsForRun.has(memoryId)) return;
-            nextReady.add(memoryId);
-            setReadyIds(new Set(nextReady));
-        };
-
-        void (async () => {
-            let index = 0;
-            const workers = Array.from({ length: PREFETCH_CONCURRENCY }, async () => {
-                while (index < allItems.length) {
-                    if (prefetchRunRef.current !== runId) return;
-                    const item = allItems[index++];
-                    await prefetchImage(item.memory.uri);
-                    markReady(item.memory.id);
-                }
-            });
-            await Promise.all(workers);
-        })();
-    }, [active, fingerprint, allItems]);
+        const currentIds = new Set(allItems.map(({ memory }) => memory.id));
+        let pruned = false;
+        revealedIdsRef.current.forEach((id) => {
+            if (!currentIds.has(id)) {
+                revealedIdsRef.current.delete(id);
+                pruned = true;
+            }
+        });
+        if (pruned) setRevealVersion((version) => version + 1);
+    }, [allItems]);
 
     useEffect(() => {
         if (!active) return;
 
-        const readyItems = allItems.filter(({ memory }) => readyIds.has(memory.id));
-        if (readyItems.length === 0) {
-            setRevealCount(0);
-            return;
-        }
-
-        setRevealCount(Math.min(REVEAL_CHUNK_SIZE, readyItems.length));
-
-        if (readyItems.length <= REVEAL_CHUNK_SIZE) return;
+        const queue = allItems.filter(({ memory }) => !revealedIdsRef.current.has(memory.id));
+        if (queue.length === 0) return;
 
         let cancelled = false;
-        let current = REVEAL_CHUNK_SIZE;
-        const interval = setInterval(() => {
-            if (cancelled) return;
-            current = Math.min(current + REVEAL_CHUNK_SIZE, readyItems.length);
-            setRevealCount(current);
-            if (current >= readyItems.length) {
-                clearInterval(interval);
+        const pendingIds: string[] = [];
+
+        const flush = () => {
+            if (cancelled || pendingIds.length === 0) return;
+            pendingIds.splice(0).forEach((id) => revealedIdsRef.current.add(id));
+            setRevealVersion((version) => version + 1);
+        };
+        const flushInterval = setInterval(flush, REVEAL_FLUSH_INTERVAL_MS);
+
+        let index = 0;
+        const workers = Array.from({ length: PREFETCH_CONCURRENCY }, async () => {
+            while (!cancelled && index < queue.length) {
+                const item = queue[index++];
+                await prefetchImage(item.memory.uri);
+                if (!cancelled) pendingIds.push(item.memory.id);
             }
-        }, REVEAL_CHUNK_DELAY_MS);
+        });
+
+        void Promise.all(workers).then(() => {
+            clearInterval(flushInterval);
+            flush();
+        });
 
         return () => {
             cancelled = true;
-            clearInterval(interval);
+            clearInterval(flushInterval);
         };
-    }, [active, allItems, readyIds]);
+    }, [active, allItems]);
 
     return useMemo(() => {
         if (!active) return [];
-        const ready = allItems.filter(({ memory }) => readyIds.has(memory.id));
-        return ready.slice(0, revealCount);
-    }, [active, allItems, readyIds, revealCount]);
+        return allItems.filter(({ memory }) => revealedIdsRef.current.has(memory.id));
+        // revealVersion invalidates this memo when the revealed set grows/shrinks.
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [active, allItems, revealVersion]);
 }

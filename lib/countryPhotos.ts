@@ -5,6 +5,7 @@ const defaultCountryPhoto = require('../assets/images/BackHome.png');
 const countryPhotoRegistry: Record<string, ImageSourcePropType> = {
     albania: require('../assets/country-photos/Albania.jpg'),
     andorra: require('../assets/country-photos/Andorra.jpg'),
+    australia: require('../assets/country-photos/Australia.jpg'),
     armenia: require('../assets/country-photos/Armenia.jpg'),
     austria: require('../assets/country-photos/Austria.jpg'),
     azerbaijan: require('../assets/country-photos/Azerbaijan.jpg'),
@@ -60,6 +61,8 @@ const countryPhotoRegistry: Record<string, ImageSourcePropType> = {
     'california': require('../assets/country-photos/California.jpg'),
     'virginia': require('../assets/country-photos/Virginia.jpg'),
     'florida': require('../assets/country-photos/Florida.jpg'),
+    'maryland': require('../assets/country-photos/Maryland.jpg'),
+    'nevada': require('../assets/country-photos/Nevada.jpg'),
 };
 
 const normalizeCountryKey = (countryName: string) =>

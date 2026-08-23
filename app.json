@@ -14,7 +14,7 @@
     },
     "ios": {
       "bundleIdentifier": "com.tentzer.memotrip",
-      "buildNumber": "11",
+      "buildNumber": "19",
       "infoPlist": {
         "LSApplicationQueriesSchemes": [
           "waze",
