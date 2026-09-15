@@ -14,7 +14,7 @@
     },
     "ios": {
       "bundleIdentifier": "com.tentzer.memotrip",
-      "buildNumber": "14",
+      "buildNumber": "25",
       "usesAppleSignIn": true,
       "infoPlist": {
         "LSApplicationQueriesSchemes": [
