@@ -47,8 +47,11 @@ export function useMarketplace({ userId, customFolders, memories, reloadMemories
     const [downloadingLibraryId, setDownloadingLibraryId] = useState<string | null>(null);
     const [downloadedMarketLibraryIds, setDownloadedMarketLibraryIds] = useState<string[]>([]);
 
+    // Country share mirrors are managed by country, not curated, so they are not publishable.
     const ownedCustomFolders = useMemo(
-        () => customFolders.filter(folder => folder.role === 'owner' && folder.owner_id === userId),
+        () => customFolders.filter(
+            folder => folder.role === 'owner' && folder.owner_id === userId && !folder.countryShareOf
+        ),
         [customFolders, userId]
     );
 

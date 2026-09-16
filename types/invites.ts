@@ -18,6 +18,8 @@ export interface PendingLibraryInvite {
     createdAt: string;
     libraryId: string;
     libraryName: string;
+    /** Set when the invite is for a shared country folder rather than a custom library. */
+    countryName?: string | null;
     previewImageUri?: string;
     itemCount: number;
 }

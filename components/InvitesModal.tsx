@@ -1,5 +1,6 @@
 import { type PendingInvite, useMemories } from '@/context/MemoryContext';
 import { useAppTheme } from '@/context/ThemeContext';
+import { getCountryPhoto } from '@/lib/countryPhotos';
 import { Ionicons } from '@expo/vector-icons';
 import { Image as ExpoImage } from 'expo-image';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
@@ -101,7 +102,9 @@ export default function InvitesModal({ visible, onClose }: InvitesModalProps) {
             <View style={styles.card}>
                 <View style={styles.cardTopRow}>
                     <View style={[styles.typeBadge, item.type === 'memo' ? styles.memoBadge : styles.libraryBadge]}>
-                        <Text style={styles.typeBadgeText}>{item.type === 'memo' ? 'Memo' : 'Library'}</Text>
+                        <Text style={styles.typeBadgeText}>
+                            {item.type === 'memo' ? 'Memo' : item.countryName ? 'Country folder' : 'Library'}
+                        </Text>
                     </View>
                     <Text style={styles.dateText}>{formatInviteDate(item.createdAt)}</Text>
                 </View>
@@ -113,6 +116,13 @@ export default function InvitesModal({ visible, onClose }: InvitesModalProps) {
                             style={styles.previewImage}
                             contentFit="cover"
                             cachePolicy="memory-disk"
+                        />
+                    ) : item.countryName ? (
+                        <ExpoImage
+                            source={getCountryPhoto(item.countryName)}
+                            style={styles.previewImage}
+                            contentFit="cover"
+                            cachePolicy="memory"
                         />
                     ) : item.previewImageUri ? (
                         <ExpoImage
@@ -129,7 +139,11 @@ export default function InvitesModal({ visible, onClose }: InvitesModalProps) {
 
                     <View style={styles.cardTextColumn}>
                         <Text style={styles.cardTitle}>
-                            {item.type === 'memo' ? 'A memo was shared with you' : `${item.libraryName} was shared with you`}
+                            {item.type === 'memo'
+                                ? 'A memo was shared with you'
+                                : item.countryName
+                                    ? `Their ${item.countryName} folder was shared with you`
+                                    : `${item.libraryName} was shared with you`}
                         </Text>
                         <Text style={styles.cardSubtitle}>
                             {item.senderEmail ? `From ${item.senderEmail}` : 'Shared with your account'}

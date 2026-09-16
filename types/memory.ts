@@ -37,6 +37,8 @@ export interface CustomFolder {
     role: 'owner' | 'viewer' | 'editor';
     isShared: boolean;
     coverImageUrl?: string | null;
+    /** Set on managed mirrors of a country folder; holds the country name. */
+    countryShareOf?: string | null;
 }
 
 export type MemoryMeta = Pick<

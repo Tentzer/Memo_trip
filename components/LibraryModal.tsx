@@ -2,7 +2,13 @@ import { useAuth } from '@/context/AuthContext';
 import { type CustomFolder, type Memory } from '@/context/MemoryContext';
 import { useAppTheme } from '@/context/ThemeContext';
 import CountryFolderBackground from '@/components/CountryFolderBackground';
+import LibraryShareInvitePanel from '@/components/LibraryShareInvitePanel';
 import { PlaceCategoryIcon } from '@/components/PlaceCategoryIcon';
+import {
+    belongsToCountryFolders,
+    countryFolderName,
+    UNKNOWN_COUNTRY_FOLDER,
+} from '@/lib/countryFolder';
 import {
     fetchGooglePlaceDetails,
     fetchGooglePlacePredictions,
@@ -46,10 +52,13 @@ import Reanimated, {
 const LIBRARY_DISMISS_DRAG_THRESHOLD = 120;
 const LIBRARY_DISMISS_VELOCITY = 900;
 
+/** `shared-country` is a country folder someone shared with you; its memos live in a library. */
+type LibraryFolderType = 'country' | 'custom' | 'shared-country';
+
 type LibraryFolder = {
     id: string;
     name: string;
-    type: 'country' | 'custom';
+    type: LibraryFolderType;
     memoCount: number;
     owner_id?: string;
     role?: 'owner' | 'viewer' | 'editor';
@@ -61,7 +70,7 @@ type AddMemosTab = 'saved' | 'search';
 type LibraryVariant = 'countries' | 'custom';
 
 const PLACEHOLDER_URL = 'https://placehold.co/400x400/e2e8f0/94a3b8.png?text=?';
-const UNKNOWN_LOCATION = 'Unknown Location';
+const UNKNOWN_LOCATION = UNKNOWN_COUNTRY_FOLDER;
 const LIBRARY_SEGMENTED_CONTROL_WIDTH = 184;
 const LIBRARY_SEGMENTED_CONTROL_PADDING = 3;
 const LIBRARY_SEGMENT_WIDTH = (LIBRARY_SEGMENTED_CONTROL_WIDTH - LIBRARY_SEGMENTED_CONTROL_PADDING * 2) / 2;
@@ -79,6 +88,7 @@ interface Props {
     createCustomFolder: (name: string) => Promise<{ success: boolean; message?: string }>;
     removeLibrary: (folderId: string) => Promise<{ success: boolean; message?: string }>;
     shareCustomFolder: (recipientInput: string, folderId: string) => Promise<void>;
+    shareCountryFolder: (recipientInput: string, countryName: string) => Promise<void>;
     grantLibraryEditAccess: (recipientInput: string, folderId: string) => Promise<void>;
     addPlaceMemory: (
         photoUri: string,
@@ -111,6 +121,7 @@ export default function LibraryModal({
     createCustomFolder,
     removeLibrary,
     shareCustomFolder,
+    shareCountryFolder,
     grantLibraryEditAccess,
     addPlaceMemory,
     toggleMemoryInCustomFolder,
@@ -344,8 +355,8 @@ export default function LibraryModal({
     const memoriesByCountry = useMemo(() => {
         const map = new Map<string, Memory[]>();
         sortedVisibleMemories.forEach(m => {
-            if (m.excludeFromCountryFolder) return;
-            const key = m.country || 'Unknown Location';
+            if (!belongsToCountryFolders(m)) return;
+            const key = countryFolderName(m);
             const existing = map.get(key);
             if (existing) existing.push(m);
             else map.set(key, [m]);
@@ -353,31 +364,47 @@ export default function LibraryModal({
         return map;
     }, [sortedVisibleMemories]);
 
-    const countryFolders = useMemo(() => {
+    /** Country folders others shared with you; their memos arrive through a mirror library. */
+    const sharedCountryFolders = useMemo(
+        () => customFolders
+            .filter(folder => !!folder.countryShareOf && folder.isShared)
+            .map(folder => ({
+                id: folder.id,
+                name: folder.countryShareOf as string,
+                type: 'shared-country' as const,
+                owner_id: folder.owner_id,
+                role: folder.role,
+                isShared: true,
+                memoCount: libraryMemoriesByCustomFolder.get(folder.id)?.length ?? 0,
+            })),
+        [customFolders, libraryMemoriesByCustomFolder],
+    );
+
+    const countryFolders = useMemo((): LibraryFolder[] => {
         const folderCounts = new Map<string, number>();
 
         sortedVisibleMemories.forEach(memory => {
-            if (memory.excludeFromCountryFolder) return;
-            const countryName = memory.country || 'Unknown Location';
-            folderCounts.set(countryName, (folderCounts.get(countryName) || 0) + 1);
+            if (!belongsToCountryFolders(memory)) return;
+            const name = countryFolderName(memory);
+            folderCounts.set(name, (folderCounts.get(name) || 0) + 1);
         });
 
-        const folders = Array.from(folderCounts.entries())
+        const ownFolders: LibraryFolder[] = Array.from(folderCounts.entries())
             .filter(([, count]) => count > 0)
             .map(([name, memoCount]) => ({
                 id: `country-${name.toLowerCase()}`,
                 name,
                 type: 'country' as const,
                 memoCount,
-            }))
-            .sort((a, b) => a.name.localeCompare(b.name));
+            }));
 
-        return folders;
-    }, [sortedVisibleMemories]);
+        return [...ownFolders, ...sharedCountryFolders].sort((a, b) => a.name.localeCompare(b.name));
+    }, [sharedCountryFolders, sortedVisibleMemories]);
 
     const customLibraryFolders = useMemo(
         () => {
-            const folders = [...customFolders]
+            const folders = customFolders
+                .filter(folder => !folder.countryShareOf)
                 .map(folder => ({
                     id: folder.id,
                     name: folder.name,
@@ -398,6 +425,11 @@ export default function LibraryModal({
     const libraryFolders = useMemo((): LibraryFolder[] => {
         return activeVariant === 'countries' ? countryFolders : customLibraryFolders;
     }, [activeVariant, countryFolders, customLibraryFolders]);
+
+    const isOwnCountryFolder = selectedFolder?.type === 'country';
+    const isSharedCountryFolder = selectedFolder?.type === 'shared-country';
+    /** Place-category chips make sense for any country folder, owned or shared. */
+    const supportsCategoryFilter = isOwnCountryFolder || isSharedCountryFolder;
 
     const selectedFolderMemories = useMemo(() => {
         if (!selectedFolder) return [];
@@ -433,16 +465,18 @@ export default function LibraryModal({
     }, [selectedFolderMemories]);
 
     const filteredFolderMemories = useMemo(() => {
-        if (selectedFolder?.type !== 'country' || activeCategoryFilters.size === 0) {
+        if (!supportsCategoryFilter || activeCategoryFilters.size === 0) {
             return selectedFolderMemories;
         }
         return selectedFolderMemories.filter(
             (memory) => memory.placeCategory && activeCategoryFilters.has(memory.placeCategory),
         );
-    }, [activeCategoryFilters, selectedFolder?.type, selectedFolderMemories]);
+    }, [activeCategoryFilters, supportsCategoryFilter, selectedFolderMemories]);
 
     const curatableCustomFolders = useMemo(
-        () => customFolders.filter(folder => folder.role === 'owner' || folder.role === 'editor'),
+        () => customFolders.filter(
+            folder => !folder.countryShareOf && (folder.role === 'owner' || folder.role === 'editor')
+        ),
         [customFolders],
     );
 
@@ -783,15 +817,18 @@ export default function LibraryModal({
     }, [addMemoriesToCustomFolder, clearMemoSelectionMode, customFolders, selectedMemoIds]);
 
     const handleRemoveSelectedLibrary = () => {
-        if (!selectedFolder || selectedFolder.type !== 'custom') return;
+        if (!selectedFolder || selectedFolder.type === 'country') return;
 
+        const isSharedCountry = selectedFolder.type === 'shared-country';
         const actionLabel = selectedFolder.role === 'owner' ? 'Delete' : 'Remove';
-        const message = selectedFolder.role === 'owner'
-            ? 'This will remove the library from your account. If other users still have access, the library will stay available for them.'
-            : 'This will remove the shared library from your account only.';
+        const message = isSharedCountry
+            ? 'This will remove the shared country folder from your account only.'
+            : selectedFolder.role === 'owner'
+                ? 'This will remove the library from your account. If other users still have access, the library will stay available for them.'
+                : 'This will remove the shared library from your account only.';
 
         Alert.alert(
-            `${actionLabel} Library`,
+            `${actionLabel} ${isSharedCountry ? 'Folder' : 'Library'}`,
             message,
             [
                 { text: 'Cancel', style: 'cancel' },
@@ -828,16 +865,43 @@ export default function LibraryModal({
         }
     };
 
+    const closeShareInvitePanel = useCallback(() => {
+        setIsShareLibraryVisible(false);
+        setLibraryShareRecipient('');
+    }, []);
+
+    const handleSendFolderInvite = useCallback(async () => {
+        if (!selectedFolder) return;
+
+        const recipient = libraryShareRecipient.trim();
+        closeShareInvitePanel();
+
+        if (selectedFolder.type === 'country') {
+            await shareCountryFolder(recipient, selectedFolder.name);
+            return;
+        }
+        await shareCustomFolder(recipient, selectedFolder.id);
+    }, [closeShareInvitePanel, libraryShareRecipient, selectedFolder, shareCountryFolder, shareCustomFolder]);
+
+    const shareInvitePanelStyles = useMemo(() => ({
+        panelCard: styles.panelCard,
+        panelInlineTitle: styles.panelInlineTitle,
+        recipientInput: styles.folderNameInput,
+        sendButton: styles.sendInviteButton,
+        cancelButton: styles.secondaryButton,
+        cancelButtonText: styles.secondaryButtonText,
+    }), [styles]);
+
     const libraryContent = (
             <SafeAreaView style={{ flex: 1, backgroundColor: theme.colors.backgroundSoft }}>
                 {/* Header */}
                 <GestureDetector gesture={dismissPanGesture}>
                     <View style={[
                         styles.headerContainer,
-                        isCategoryFilterVisible && !isMemoSelectionMode && selectedFolder?.type === 'country'
+                        isCategoryFilterVisible && !isMemoSelectionMode && supportsCategoryFilter
                             ? styles.headerContainerDropdownOpen
                             : null,
-                        isBulkLibraryPickerVisible && isMemoSelectionMode && selectedFolder?.type === 'country'
+                        isBulkLibraryPickerVisible && isMemoSelectionMode && isOwnCountryFolder
                             ? styles.headerContainerDropdownOpen
                             : null,
                     ]}>
@@ -880,14 +944,14 @@ export default function LibraryModal({
                         {selectedFolder ? (
                             <View style={[
                                 styles.actionsContainer,
-                                isCategoryFilterVisible && !isMemoSelectionMode && selectedFolder.type === 'country'
+                                isCategoryFilterVisible && !isMemoSelectionMode && supportsCategoryFilter
                                     ? styles.actionsContainerDropdownOpen
                                     : null,
-                                isBulkLibraryPickerVisible && isMemoSelectionMode && selectedFolder.type === 'country'
+                                isBulkLibraryPickerVisible && isMemoSelectionMode && isOwnCountryFolder
                                     ? styles.actionsContainerDropdownOpen
                                     : null,
                             ]}>
-                                {isMemoSelectionMode && selectedFolder.type === 'country' ? (
+                                {isMemoSelectionMode && isOwnCountryFolder ? (
                                     <View style={styles.headerIconRow}>
                                         <TouchableOpacity
                                             onPress={clearMemoSelectionMode}
@@ -937,7 +1001,7 @@ export default function LibraryModal({
                                     </View>
                                 ) : (
                                 <View style={styles.headerIconRow}>
-                                    {selectedFolder.type === 'country' && categoriesInFolder.length > 0 ? (
+                                    {supportsCategoryFilter && categoriesInFolder.length > 0 ? (
                                         <TouchableOpacity
                                             onPress={() => {
                                                 setIsCategoryFilterVisible((previous) => {
@@ -966,7 +1030,7 @@ export default function LibraryModal({
                                             <Ionicons name="filter-outline" size={20} color="white" />
                                         </TouchableOpacity>
                                     ) : null}
-                                    {selectedFolder.type === 'country' && deletableFolderMemories.length > 0 ? (
+                                    {isOwnCountryFolder && deletableFolderMemories.length > 0 ? (
                                         <TouchableOpacity
                                             onPress={enterMemoSelectionMode}
                                             style={styles.folderActionButton}
@@ -998,19 +1062,37 @@ export default function LibraryModal({
                                             <Ionicons name={isAddToFolderVisible ? 'close' : 'add'} size={20} color="white" />
                                         </TouchableOpacity>
                                     ) : null}
+                                    {isOwnCountryFolder ? (
+                                        <TouchableOpacity
+                                            onPress={() => {
+                                                setIsCategoryFilterVisible(false);
+                                                setIsShareLibraryVisible(prev => !prev);
+                                            }}
+                                            style={[
+                                                styles.folderActionButton,
+                                                { backgroundColor: isShareLibraryVisible ? '#1e40af' : '#1d4ed8' },
+                                            ]}
+                                        >
+                                            <Ionicons name="share-social-outline" size={20} color="white" />
+                                        </TouchableOpacity>
+                                    ) : null}
                                     <TouchableOpacity
                                         onPress={() => {
                                             if (selectedFolderMemories.length === 0) {
                                                 Alert.alert('No memos yet', 'This folder has no memos to show on the map.');
                                                 return;
                                             }
-                                            onShowFolderOnMap(selectedFolder.id, selectedFolder.type, selectedFolder.name);
+                                            onShowFolderOnMap(
+                                                selectedFolder.id,
+                                                selectedFolder.type === 'country' ? 'country' : 'custom',
+                                                selectedFolder.name,
+                                            );
                                         }}
                                         style={styles.folderActionButton}
                                     >
                                         <Ionicons name="map-outline" size={20} color="white" />
                                     </TouchableOpacity>
-                                    {selectedFolder.type === 'custom' ? (
+                                    {selectedFolder.type !== 'country' ? (
                                         <TouchableOpacity
                                             onPress={() => {
                                                 setIsLibraryActionsVisible(previous => {
@@ -1032,7 +1114,7 @@ export default function LibraryModal({
                                     ) : null}
                                 </View>
                                 )}
-                                {selectedFolder.type === 'custom' && isLibraryActionsVisible && !isMemoSelectionMode ? (
+                                {selectedFolder.type !== 'country' && isLibraryActionsVisible && !isMemoSelectionMode ? (
                                     <View style={[styles.actionsRow, { maxWidth: libraryActionsBarWidth }]}>
                                         <ScrollView
                                             horizontal
@@ -1090,7 +1172,7 @@ export default function LibraryModal({
                                         </ScrollView>
                                     </View>
                                 ) : null}
-                                {isBulkLibraryPickerVisible && isMemoSelectionMode && selectedFolder.type === 'country' ? (
+                                {isBulkLibraryPickerVisible && isMemoSelectionMode && isOwnCountryFolder ? (
                                     <View style={styles.categoryFilterDropdown}>
                                         {curatableCustomFolders.length === 0 ? (
                                             <View style={[styles.categoryFilterDropdownItem, styles.categoryFilterDropdownItemLast]}>
@@ -1127,7 +1209,7 @@ export default function LibraryModal({
                                         )}
                                     </View>
                                 ) : null}
-                                {isCategoryFilterVisible && !isMemoSelectionMode && selectedFolder.type === 'country' ? (
+                                {isCategoryFilterVisible && !isMemoSelectionMode && supportsCategoryFilter ? (
                                     <View style={styles.categoryFilterDropdown}>
                                         <TouchableOpacity
                                             onPress={resetCategoryFilters}
@@ -1259,13 +1341,13 @@ export default function LibraryModal({
                 </View>
                 </GestureDetector>
 
-                {isCategoryFilterVisible && !isMemoSelectionMode && selectedFolder?.type === 'country' ? (
+                {isCategoryFilterVisible && !isMemoSelectionMode && supportsCategoryFilter ? (
                     <Pressable
                         style={styles.categoryFilterBackdrop}
                         onPress={() => setIsCategoryFilterVisible(false)}
                     />
                 ) : null}
-                {isBulkLibraryPickerVisible && isMemoSelectionMode && selectedFolder?.type === 'country' ? (
+                {isBulkLibraryPickerVisible && isMemoSelectionMode && isOwnCountryFolder ? (
                     <Pressable
                         style={styles.categoryFilterBackdrop}
                         onPress={() => setIsBulkLibraryPickerVisible(false)}
@@ -1358,10 +1440,11 @@ export default function LibraryModal({
                                     }}
                                     style={styles.folderCard}
                                 >
-                                    {item.type === 'country' ? (
+                                    {item.type === 'country' || item.type === 'shared-country' ? (
                                         <CountryFolderBackground
                                             countryName={item.name}
                                             memoCount={item.memoCount}
+                                            footerLabel={item.type === 'shared-country' ? 'Shared with you' : undefined}
                                             styles={{
                                                 countryFolderBackground: styles.countryFolderBackground,
                                                 countryFolderOverlay: styles.countryFolderOverlay,
@@ -1421,46 +1504,34 @@ export default function LibraryModal({
                     </Animated.View>
                 ) : (
                     <Animated.View style={[styles.selectedFolderView, folderViewAnimatedStyle]}>
+                        {isOwnCountryFolder && isShareLibraryVisible ? (
+                            <View style={{ paddingHorizontal: 16, paddingVertical: 12 }}>
+                                <LibraryShareInvitePanel
+                                    title={`Share ${selectedFolder.name}`}
+                                    recipient={libraryShareRecipient}
+                                    onChangeRecipient={setLibraryShareRecipient}
+                                    onSend={() => { void handleSendFolderInvite(); }}
+                                    onCancel={closeShareInvitePanel}
+                                    styles={shareInvitePanelStyles}
+                                />
+                                <Text style={styles.libraryPlaceSearchHint}>
+                                    They see every memo in this folder with its place type, notes and imported
+                                    post link. Memos you save here later are shared automatically.
+                                </Text>
+                            </View>
+                        ) : null}
+
                         {selectedFolder.type === 'custom' ? (
                             <View style={{ paddingHorizontal: 16, paddingVertical: 12 }}>
                                 {isShareLibraryVisible && canShareSelectedFolder ? (
-                                    <View style={styles.panelCard}>
-                                        <Text style={styles.panelInlineTitle}>
-                                            Share {selectedFolder.name}
-                                        </Text>
-                                        <TextInput
-                                            value={libraryShareRecipient}
-                                            onChangeText={setLibraryShareRecipient}
-                                            placeholder="Friend's username"
-                                            placeholderTextColor={theme.colors.placeholder}
-                                            autoCapitalize="none"
-                                            autoCorrect={false}
-                                            keyboardType="default"
-                                            style={styles.folderNameInput}
-                                            returnKeyType="send"
-                                        />
-                                        <View style={{ flexDirection: 'row', gap: 10, marginTop: 14 }}>
-                                            <TouchableOpacity
-                                                onPress={async () => {
-                                                    await shareCustomFolder(libraryShareRecipient.trim(), selectedFolder.id);
-                                                    setIsShareLibraryVisible(false);
-                                                    setLibraryShareRecipient('');
-                                                }}
-                                                style={styles.sendInviteButton}
-                                            >
-                                                <Text style={{ color: 'white', fontWeight: '700' }}>Send Invite</Text>
-                                            </TouchableOpacity>
-                                            <TouchableOpacity
-                                                onPress={() => {
-                                                    setIsShareLibraryVisible(false);
-                                                    setLibraryShareRecipient('');
-                                                }}
-                                                style={styles.secondaryButton}
-                                            >
-                                                <Text style={styles.secondaryButtonText}>Cancel</Text>
-                                            </TouchableOpacity>
-                                        </View>
-                                    </View>
+                                    <LibraryShareInvitePanel
+                                        title={`Share ${selectedFolder.name}`}
+                                        recipient={libraryShareRecipient}
+                                        onChangeRecipient={setLibraryShareRecipient}
+                                        onSend={() => { void handleSendFolderInvite(); }}
+                                        onCancel={closeShareInvitePanel}
+                                        styles={shareInvitePanelStyles}
+                                    />
                                 ) : null}
 
                                 {isGrantAccessVisible && canGrantEditAccess ? (
@@ -1678,7 +1749,7 @@ export default function LibraryModal({
                             </View>
                         ) : null}
 
-                        {selectedFolder.type === 'country' && countrySubFolders.length > 0 ? (
+                        {isOwnCountryFolder && countrySubFolders.length > 0 ? (
                             <View style={styles.countrySubFoldersSection}>
                                 <Text style={styles.countrySubFoldersTitle}>
                                     Related libraries
@@ -1740,7 +1811,7 @@ export default function LibraryModal({
                             windowSize={5}
                             contentContainerStyle={{ paddingHorizontal: 10, paddingBottom: 24, paddingTop: 0 }}
                             ListEmptyComponent={
-                                selectedFolder.type === 'country' && hasActiveCategoryFilters ? (
+                                supportsCategoryFilter && hasActiveCategoryFilters ? (
                                     <View style={styles.emptyFolderCard}>
                                         <Ionicons name="filter-outline" size={38} color={theme.colors.textMuted} />
                                         <Text style={styles.emptyInlineTitle}>
@@ -1759,7 +1830,9 @@ export default function LibraryModal({
                                     <Text style={styles.emptyInlineText}>
                                         {selectedFolder.type === 'country'
                                             ? 'New photos taken in this country will appear here automatically.'
-                                            : selectedCustomFolder?.role === 'viewer'
+                                            : selectedFolder.type === 'shared-country'
+                                                ? 'Memos the owner saves in this country will appear here.'
+                                                : selectedCustomFolder?.role === 'viewer'
                                                 ? 'You have view-only access. Ask the owner to grant edit access if you should add photos.'
                                                 : 'Use Add Memos to place photos inside this library.'}
                                     </Text>

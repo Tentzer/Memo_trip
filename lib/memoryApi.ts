@@ -88,6 +88,7 @@ function mapLibraryRow(library: any, userId: string, roleByLibraryId: Record<str
         role: roleByLibraryId[id],
         isShared: library.owner_id !== userId,
         coverImageUrl: typeof library.cover_image_url === 'string' ? library.cover_image_url : null,
+        countryShareOf: typeof library.country_share_of === 'string' ? library.country_share_of : null,
     };
 }
 

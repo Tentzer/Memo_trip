@@ -1,4 +1,5 @@
-import { resolveRecipientProfile } from '@/lib/resolveRecipientProfile';
+import { getCountryFolderMemories } from '@/lib/countryFolder';
+import { RecipientProfile, resolveRecipientProfile } from '@/lib/resolveRecipientProfile';
 import { supabase } from '@/lib/supabase';
 import { InviteActionResult, PendingInvite, PendingLibraryInvite, PendingMemoInvite } from '@/types/invites';
 import { CustomFolder, Memory } from '@/types/memory';
@@ -8,12 +9,165 @@ import { Alert } from 'react-native';
 
 interface Params {
     user: User | null;
+    memoriesRef: React.MutableRefObject<Memory[]>;
     customFoldersRef: React.MutableRefObject<CustomFolder[]>;
     getLibraryMemories: (folderId: string) => Memory[];
     reloadMemories: () => Promise<void>;
 }
 
-export function useSharing({ user, customFoldersRef, getLibraryMemories, reloadMemories }: Params) {
+type ShareStepResult = { ok: true } | { ok: false; message: string };
+
+/** Resolves a username/email input to a recipient, alerting when it cannot be used. */
+async function resolveShareRecipient(recipientInput: string): Promise<RecipientProfile | null> {
+    const trimmed = recipientInput.trim();
+    if (!trimmed) {
+        Alert.alert('Username required', 'Enter your friend Memo Trip username (or their email).');
+        return null;
+    }
+
+    const receiver = await resolveRecipientProfile(trimmed);
+    if (!receiver) {
+        Alert.alert(
+            'User not found',
+            trimmed.includes('@')
+                ? 'No Memo Trip account uses that email.'
+                : 'No Memo Trip user has that username.',
+        );
+        return null;
+    }
+
+    return receiver;
+}
+
+async function getExistingLibraryAccess(
+    libraryId: string,
+    receiver: RecipientProfile,
+): Promise<'member' | 'invited' | null> {
+    const { data: membership } = await supabase
+        .from('library_members')
+        .select('user_id')
+        .eq('library_id', libraryId)
+        .eq('user_id', receiver.id)
+        .maybeSingle();
+
+    if (membership) return 'member';
+
+    const { data: pendingInvite } = await supabase
+        .from('library_invites')
+        .select('id')
+        .eq('library_id', libraryId)
+        .eq('receiver_email', receiver.email)
+        .eq('status', 'pending')
+        .maybeSingle();
+
+    return pendingInvite ? 'invited' : null;
+}
+
+/** Creates the invite plus the preview rows the recipient sees before accepting. */
+async function sendLibraryInvite(
+    libraryId: string,
+    senderId: string,
+    receiver: RecipientProfile,
+    folderMemories: Memory[],
+): Promise<ShareStepResult> {
+    const { data: insertedInvite, error: inviteError } = await supabase
+        .from('library_invites')
+        .insert([{
+            library_id: libraryId,
+            sender_id: senderId,
+            receiver_email: receiver.email,
+            status: 'pending',
+            created_at: new Date().toISOString(),
+        }])
+        .select('id')
+        .single();
+
+    if (inviteError || !insertedInvite) {
+        return { ok: false, message: inviteError?.message ?? 'Could not create the invitation.' };
+    }
+
+    const snapshotRows = folderMemories.map(m => ({
+        sender_id: senderId,
+        receiver_email: receiver.email,
+        memory_id: m.id,
+        image_uri: m.uri,
+        latitude: m.latitude,
+        longitude: m.longitude,
+        status: `library_invite:${insertedInvite.id}`,
+        created_at: new Date().toISOString(),
+    }));
+
+    const { error: snapshotError } = await supabase.from('pending_shares').insert(snapshotRows);
+    if (snapshotError) {
+        await supabase.from('library_invites').delete().eq('id', insertedInvite.id);
+        return { ok: false, message: snapshotError.message };
+    }
+
+    return { ok: true };
+}
+
+/**
+ * Country folders exist only as a client-side grouping, so sharing one mirrors it into a managed
+ * library. A DB trigger keeps later memos in sync; this backfills the memos saved before the share.
+ */
+async function ensureCountryShareLibrary(
+    ownerId: string,
+    countryName: string,
+    folderMemories: Memory[],
+): Promise<{ ok: true; libraryId: string } | { ok: false; message: string }> {
+    const { data: existing, error: existingError } = await supabase
+        .from('libraries')
+        .select('id')
+        .eq('owner_id', ownerId)
+        .eq('country_share_of', countryName)
+        .maybeSingle();
+
+    if (existingError) {
+        return { ok: false, message: existingError.message };
+    }
+
+    let libraryId = existing?.id ? existing.id.toString() : null;
+
+    if (!libraryId) {
+        const { data: inserted, error: insertError } = await supabase
+            .from('libraries')
+            .insert([{ owner_id: ownerId, name: countryName, country_share_of: countryName }])
+            .select('id')
+            .single();
+
+        if (insertError || !inserted) {
+            return { ok: false, message: insertError?.message ?? 'Could not prepare the folder.' };
+        }
+
+        libraryId = inserted.id.toString();
+
+        const { error: memberError } = await supabase.from('library_members').upsert(
+            [{ library_id: libraryId, user_id: ownerId, role: 'owner' }],
+            { onConflict: 'library_id,user_id' }
+        );
+
+        if (memberError) {
+            return { ok: false, message: memberError.message };
+        }
+    }
+
+    const { error: memoError } = await supabase.from('library_memos').upsert(
+        folderMemories.map(memory => ({
+            library_id: libraryId,
+            memo_id: memory.id,
+            added_by: ownerId,
+        })),
+        { onConflict: 'library_id,memo_id', ignoreDuplicates: true }
+    );
+
+    if (memoError) {
+        return { ok: false, message: memoError.message };
+    }
+
+    return { ok: true, libraryId };
+}
+
+export function useSharing({ user, memoriesRef, customFoldersRef, getLibraryMemories, reloadMemories }: Params) {
     const [pendingInvites, setPendingInvites] = useState<PendingInvite[]>([]);
     const [invitesLoading, setInvitesLoading] = useState(false);
 
@@ -62,7 +216,7 @@ export function useSharing({ user, customFoldersRef, getLibraryMemories, reloadM
                 ? supabase.from('profiles').select('id, email').in('id', senderIds)
                 : Promise.resolve({ data: [], error: null }),
             libraryIds.length > 0
-                ? supabase.from('libraries').select('id, name').in('id', libraryIds)
+                ? supabase.from('libraries').select('id, name, country_share_of').in('id', libraryIds)
                 : Promise.resolve({ data: [], error: null }),
             libraryInviteStatuses.length > 0
                 ? supabase
@@ -89,8 +243,12 @@ export function useSharing({ user, customFoldersRef, getLibraryMemories, reloadM
         });
 
         const libraryNameById = new Map<string, string>();
+        const libraryCountryById = new Map<string, string>();
         (librariesResult.data ?? []).forEach((library: any) => {
             libraryNameById.set(library.id.toString(), library.name);
+            if (typeof library.country_share_of === 'string') {
+                libraryCountryById.set(library.id.toString(), library.country_share_of);
+            }
         });
 
         const libraryPreviewByInviteId = new Map<string, { imageUri?: string; itemCount: number }>();
@@ -125,6 +283,7 @@ export function useSharing({ user, customFoldersRef, getLibraryMemories, reloadM
                 createdAt: row.created_at ?? new Date().toISOString(),
                 libraryId: row.library_id.toString(),
                 libraryName: libraryNameById.get(row.library_id.toString()) ?? 'Shared library',
+                countryName: libraryCountryById.get(row.library_id.toString()) ?? null,
                 previewImageUri: preview?.imageUri,
                 itemCount: preview?.itemCount ?? 0,
             };
@@ -206,11 +365,6 @@ export function useSharing({ user, customFoldersRef, getLibraryMemories, reloadM
     }, []);
 
     const shareCustomFolder = useCallback(async (recipientInput: string, folderId: string): Promise<void> => {
-        const trimmedRecipient = recipientInput.trim();
-        if (!trimmedRecipient) {
-            Alert.alert('Username required', 'Enter your friend Memo Trip username (or their email).');
-            return;
-        }
         if (!user?.id) {
             Alert.alert('Error', 'You need to be logged in to share a library.');
             return;
@@ -226,43 +380,19 @@ export function useSharing({ user, customFoldersRef, getLibraryMemories, reloadM
             return;
         }
 
-        const receiver = await resolveRecipientProfile(trimmedRecipient);
-
-        if (!receiver) {
-            Alert.alert(
-                'User not found',
-                trimmedRecipient.includes('@')
-                    ? 'No Memo Trip account uses that email.'
-                    : 'No Memo Trip user has that username.',
-            );
-            return;
-        }
+        const receiver = await resolveShareRecipient(recipientInput);
+        if (!receiver) return;
         if (receiver.id === user.id) {
             Alert.alert('Invalid recipient', 'You already own this library.');
             return;
         }
 
-        const { data: existingMembership } = await supabase
-            .from('library_members')
-            .select('user_id')
-            .eq('library_id', folderId)
-            .eq('user_id', receiver.id)
-            .maybeSingle();
-
-        if (existingMembership) {
+        const access = await getExistingLibraryAccess(folderId, receiver);
+        if (access === 'member') {
             Alert.alert('Already shared', `${receiver.email} already has access to this library.`);
             return;
         }
-
-        const { data: pendingInvite } = await supabase
-            .from('library_invites')
-            .select('id')
-            .eq('library_id', folderId)
-            .eq('receiver_email', receiver.email)
-            .eq('status', 'pending')
-            .maybeSingle();
-
-        if (pendingInvite) {
+        if (access === 'invited') {
             Alert.alert('Invite pending', 'An invitation has already been sent to this user.');
             return;
         }
@@ -273,50 +403,70 @@ export function useSharing({ user, customFoldersRef, getLibraryMemories, reloadM
             return;
         }
 
-        const { data: insertedInvite, error: inviteError } = await supabase
-            .from('library_invites')
-            .insert([{
-                library_id: folderId,
-                sender_id: user.id,
-                receiver_email: receiver.email,
-                status: 'pending',
-                created_at: new Date().toISOString(),
-            }])
-            .select('id')
-            .single();
-
-        if (inviteError || !insertedInvite) {
-            Alert.alert('Error', 'Could not share library: ' + inviteError?.message);
-            return;
-        }
-
-        const snapshotRows = sourceLibraryMemories.map(m => ({
-            sender_id: user.id,
-            receiver_email: receiver.email,
-            memory_id: m.id,
-            image_uri: m.uri,
-            latitude: m.latitude,
-            longitude: m.longitude,
-            status: `library_invite:${insertedInvite.id}`,
-            created_at: new Date().toISOString(),
-        }));
-
-        const { error: snapshotError } = await supabase.from('pending_shares').insert(snapshotRows);
-        if (snapshotError) {
-            await supabase.from('library_invites').delete().eq('id', insertedInvite.id);
-            Alert.alert('Error', 'Could not prepare library share: ' + snapshotError.message);
+        const invite = await sendLibraryInvite(folderId, user.id, receiver, sourceLibraryMemories);
+        if (!invite.ok) {
+            Alert.alert('Error', 'Could not share library: ' + invite.message);
             return;
         }
 
         Alert.alert('Success', 'Library invitation sent.');
     }, [user, customFoldersRef, getLibraryMemories]);
 
-    const grantLibraryEditAccess = useCallback(async (recipientInput: string, folderId: string): Promise<void> => {
-        const trimmed = recipientInput.trim();
-        if (!trimmed) {
-            Alert.alert('Username required', 'Enter their Memo Trip username (or email).');
+    const shareCountryFolder = useCallback(async (recipientInput: string, countryName: string): Promise<void> => {
+        if (!user?.id) {
+            Alert.alert('Error', 'You need to be logged in to share a country folder.');
             return;
         }
+
+        const folderMemories = getCountryFolderMemories(memoriesRef.current, countryName)
+            .filter(m => !m.isShared);
+        if (folderMemories.length === 0) {
+            Alert.alert('Empty folder', 'Save at least one memo in this country before sharing it.');
+            return;
+        }
+
+        const receiver = await resolveShareRecipient(recipientInput);
+        if (!receiver) return;
+        if (receiver.id === user.id) {
+            Alert.alert('Invalid recipient', 'Choose someone else to share with.');
+            return;
+        }
+
+        const mirrorLibrary = await ensureCountryShareLibrary(user.id, countryName, folderMemories);
+        if (!mirrorLibrary.ok) {
+            Alert.alert('Error', 'Could not prepare this country folder: ' + mirrorLibrary.message);
+            return;
+        }
+
+        const access = await getExistingLibraryAccess(mirrorLibrary.libraryId, receiver);
+        if (access === 'member') {
+            Alert.alert('Already shared', `${receiver.email} already has access to ${countryName}.`);
+            return;
+        }
+        if (access === 'invited') {
+            Alert.alert('Invite pending', 'An invitation has already been sent to this user.');
+            return;
+        }
+
+        const invite = await sendLibraryInvite(
+            mirrorLibrary.libraryId,
+            user.id,
+            receiver,
+            folderMemories,
+        );
+        if (!invite.ok) {
+            Alert.alert('Error', 'Could not share country folder: ' + invite.message);
+            return;
+        }
+
+        await reloadMemories();
+        Alert.alert(
+            'Success',
+            `${countryName} invitation sent. New memos you save there are shared automatically.`
+        );
+    }, [user, memoriesRef, reloadMemories]);
+
+    const grantLibraryEditAccess = useCallback(async (recipientInput: string, folderId: string): Promise<void> => {
         if (!user?.id) {
             Alert.alert('Error', 'You need to be logged in.');
             return;
@@ -332,17 +482,8 @@ export function useSharing({ user, customFoldersRef, getLibraryMemories, reloadM
             return;
         }
 
-        const receiver = await resolveRecipientProfile(trimmed);
-
-        if (!receiver) {
-            Alert.alert(
-                'User not found',
-                trimmed.includes('@')
-                    ? 'No Memo Trip account uses that email.'
-                    : 'No Memo Trip user has that username.',
-            );
-            return;
-        }
+        const receiver = await resolveShareRecipient(recipientInput);
+        if (!receiver) return;
         if (receiver.id === user.id) {
             Alert.alert('Invalid recipient', 'Choose someone else who already joined this library.');
             return;
@@ -521,6 +662,7 @@ export function useSharing({ user, customFoldersRef, getLibraryMemories, reloadM
         refreshPendingInvites,
         handleShareSubmit,
         shareCustomFolder,
+        shareCountryFolder,
         acceptMemoInvite,
         declineMemoInvite,
         acceptLibraryInvite,

@@ -43,6 +43,7 @@ interface MemoryContextType {
     getLibraryMemories: (folderId: string) => Memory[];
     handleShareSubmit: (recipientInput: string, selectedMemory: Memory | null) => Promise<void>;
     shareCustomFolder: (recipientInput: string, folderId: string) => Promise<void>;
+    shareCountryFolder: (recipientInput: string, countryName: string) => Promise<void>;
     grantLibraryEditAccess: (recipientInput: string, folderId: string) => Promise<void>;
     pendingInvites: PendingInvite[];
     invitesLoading: boolean;
@@ -195,6 +196,7 @@ export function MemoryProvider({ children, ready = true }: { children: React.Rea
         refreshPendingInvites,
         handleShareSubmit,
         shareCustomFolder,
+        shareCountryFolder,
         grantLibraryEditAccess,
         acceptMemoInvite,
         declineMemoInvite,
@@ -203,6 +205,7 @@ export function MemoryProvider({ children, ready = true }: { children: React.Rea
         checkForIncomingShares,
     } = useSharing({
         user,
+        memoriesRef,
         customFoldersRef,
         getLibraryMemories,
         reloadMemories,
@@ -228,6 +231,7 @@ export function MemoryProvider({ children, ready = true }: { children: React.Rea
         getLibraryMemories,
         handleShareSubmit,
         shareCustomFolder,
+        shareCountryFolder,
         grantLibraryEditAccess,
         pendingInvites,
         invitesLoading,
@@ -241,7 +245,7 @@ export function MemoryProvider({ children, ready = true }: { children: React.Rea
         memories, sharedLibraryMemories, customFolders,
         addMemory, addPlaceMemory, deleteMemory, updateMemoryInfo,
         createCustomFolder, removeLibrary, toggleMemoryInCustomFolder, addMemoriesToCustomFolder, updateCustomFolderCover, getLibraryMemories,
-        handleShareSubmit, shareCustomFolder, grantLibraryEditAccess, pendingInvites, invitesLoading, reloadMemories, refreshPendingInvites,
+        handleShareSubmit, shareCustomFolder, shareCountryFolder, grantLibraryEditAccess, pendingInvites, invitesLoading, reloadMemories, refreshPendingInvites,
         acceptMemoInvite, declineMemoInvite, acceptLibraryInvite, declineLibraryInvite,
     ]);
 

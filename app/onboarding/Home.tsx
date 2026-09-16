@@ -179,6 +179,7 @@ export default function MapScreen() {
         addPlaceMemory,
         handleShareSubmit,
         shareCustomFolder,
+        shareCountryFolder,
         grantLibraryEditAccess,
         removeLibrary,
         createCustomFolder,
@@ -406,6 +407,8 @@ export default function MapScreen() {
         if (!currentGpsCountry || currentGpsCountry === UNKNOWN_LOCATION) return [];
 
         return customFolders
+            // Your own country share mirror duplicates the country filter already on the map.
+            .filter((folder) => !folder.countryShareOf || folder.isShared)
             .map((folder) => {
                 const memoCount = [...memories, ...sharedLibraryMemories].filter((memory) =>
                     !memory.deletedAt &&
@@ -978,6 +981,7 @@ export default function MapScreen() {
                 createCustomFolder={createCustomFolder}
                 removeLibrary={removeLibrary}
                 shareCustomFolder={shareCustomFolder}
+                shareCountryFolder={shareCountryFolder}
                 grantLibraryEditAccess={grantLibraryEditAccess}
                 addPlaceMemory={addPlaceMemory}
                 toggleMemoryInCustomFolder={toggleMemoryInCustomFolder}

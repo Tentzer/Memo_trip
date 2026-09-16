@@ -6,6 +6,8 @@ import { StyleSheet, Text, View } from 'react-native';
 type Props = {
     countryName: string;
     memoCount: number;
+    /** Extra line under the memo count, e.g. to mark a folder shared by someone else. */
+    footerLabel?: string;
     styles: {
         countryFolderBackground: object;
         countryFolderOverlay: object;
@@ -15,7 +17,7 @@ type Props = {
     };
 };
 
-export default function CountryFolderBackground({ countryName, memoCount, styles }: Props) {
+export default function CountryFolderBackground({ countryName, memoCount, footerLabel, styles }: Props) {
     const [source, setSource] = useState(() => getCountryPhoto(countryName));
 
     const onError = useCallback(() => {
@@ -41,6 +43,9 @@ export default function CountryFolderBackground({ countryName, memoCount, styles
                 <Text style={styles.countryFolderCount}>
                     {memoCount} memo{memoCount === 1 ? '' : 's'}
                 </Text>
+                {footerLabel ? (
+                    <Text style={styles.countryFolderCount}>{footerLabel}</Text>
+                ) : null}
             </View>
         </View>
     );
