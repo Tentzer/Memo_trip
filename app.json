@@ -3,6 +3,10 @@
     "name": "Memo Trip",
     "slug": "memo_trip",
     "version": "1.0.1",
+    "platforms": [
+      "ios",
+      "android"
+    ],
     "orientation": "default",
     "scheme": "memo-trip",
     "userInterfaceStyle": "automatic",
