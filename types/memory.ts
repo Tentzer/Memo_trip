@@ -13,6 +13,8 @@ export type MemoryPlaceCategory =
 export interface Memory {
     id: string;
     uri: string;
+    /** Public URL of a ~200px JPEG for map pins. Null until one exists. */
+    thumb_uri?: string | null;
     latitude: number;
     longitude: number;
     created_at: string;

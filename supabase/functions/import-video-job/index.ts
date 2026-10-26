@@ -1,9 +1,18 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
 
-const CORS_HEADERS = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers":
-    "authorization, x-client-info, apikey, content-type",
+import { authenticateRequest } from "../_shared/auth_supabase.ts";
+import { jsonResponse, CORS_HEADERS } from "../_shared/http.ts";
+import {
+  dailyLimitMessage,
+  DEFAULT_IMPORT_VIDEO_DAILY_LIMIT,
+  enforceDailyLimit,
+  IMPORT_VIDEO_ENDPOINT,
+  readDailyLimit,
+} from "../_shared/rate_limit.ts";
+import { consumeEdgeDailyRequest } from "../_shared/rate_limit_supabase.ts";
+
+declare const EdgeRuntime: {
+  waitUntil(promise: Promise<unknown>): void;
 };
 
 /** Supabase background tasks cap wall-clock around 400s; stay under that so catch runs. */
@@ -15,62 +24,47 @@ Deno.serve(async (req: Request) => {
   }
 
   try {
-    const authHeader = req.headers.get("Authorization");
-    if (!authHeader) {
-      return new Response(JSON.stringify({ error: "Unauthorized" }), {
-        status: 401,
-        headers: CORS_HEADERS,
-      });
-    }
+    const authResult = await authenticateRequest(req);
+    if (authResult instanceof Response) return authResult;
 
     const supabaseUrl = Deno.env.get("SUPABASE_URL") ?? "";
-    const supabaseAnonKey = Deno.env.get("SUPABASE_ANON_KEY") ?? "";
     const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
     const modalUrl = Deno.env.get("MODAL_TRANSCRIBE_URL") ?? "";
-
-    const userClient = createClient(supabaseUrl, supabaseAnonKey, {
-      global: { headers: { Authorization: authHeader } },
-    });
-
-    const { data: { user }, error: authError } = await userClient.auth.getUser();
-    if (authError || !user) {
-      return new Response(JSON.stringify({ error: "Unauthorized" }), {
-        status: 401,
-        headers: CORS_HEADERS,
-      });
-    }
 
     const body = await req.json();
     const url: string | undefined = body?.url;
     if (!url || typeof url !== "string") {
-      return new Response(JSON.stringify({ error: "url is required" }), {
-        status: 400,
-        headers: CORS_HEADERS,
-      });
+      return jsonResponse({ error: "url is required" }, 400);
     }
+
+    const dailyLimit = readDailyLimit(
+      Deno.env.get("IMPORT_VIDEO_DAILY_LIMIT"),
+      DEFAULT_IMPORT_VIDEO_DAILY_LIMIT,
+    );
+    const limited = await enforceDailyLimit(consumeEdgeDailyRequest, {
+      userId: authResult.userId,
+      endpoint: IMPORT_VIDEO_ENDPOINT,
+      limit: dailyLimit,
+      message: dailyLimitMessage(dailyLimit, "video imports"),
+    });
+    if (limited) return limited;
 
     const adminClient = createClient(supabaseUrl, serviceRoleKey);
 
     const { data: job, error: insertError } = await adminClient
       .from("video_import_jobs")
-      .insert({ user_id: user.id, url, status: "pending" })
+      .insert({ user_id: authResult.userId, url, status: "pending" })
       .select("id")
       .single();
 
     if (insertError || !job) {
       console.error("insert error:", insertError);
-      return new Response(JSON.stringify({ error: "Failed to create job" }), {
-        status: 500,
-        headers: CORS_HEADERS,
-      });
+      return jsonResponse({ error: "Failed to create job" }, 500);
     }
 
     const jobId: string = job.id;
 
-    const response = new Response(
-      JSON.stringify({ jobId }),
-      { headers: { ...CORS_HEADERS, "Content-Type": "application/json" } },
-    );
+    const response = jsonResponse({ jobId });
 
     EdgeRuntime.waitUntil((async () => {
       try {
@@ -128,9 +122,6 @@ Deno.serve(async (req: Request) => {
     return response;
   } catch (err) {
     console.error("unexpected error:", err);
-    return new Response(
-      JSON.stringify({ error: String(err) }),
-      { status: 500, headers: { ...CORS_HEADERS, "Content-Type": "application/json" } },
-    );
+    return jsonResponse({ error: "Something went wrong. Please try again." }, 500);
   }
 });

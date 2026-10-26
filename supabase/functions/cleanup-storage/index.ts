@@ -1,9 +1,9 @@
 /**
  * Admin-only: remove Storage objects in bucket `memories` that no DB row references.
  *
- * Memories: only rows with deleted_at IS NULL count as referencing a file. If every memo
- * for that image_url is archived, that path is not considered referenced here (unless
- * another table still references it).
+ * Memories: only rows with deleted_at IS NULL count as referencing a file. image_url and
+ * thumb_uri are both referenced. If every memo for that URL is archived, that path is not
+ * considered referenced here (unless another table still references it).
  *
  * Deploy:
  *   supabase secrets set CLEANUP_STORAGE_SECRET=<random-long-string>
@@ -52,6 +52,10 @@ function pathFromPublicUrl(url: string): string | null {
     return null;
 }
 
+function asUrl(value: unknown): string | undefined {
+    return typeof value === 'string' ? value : undefined;
+}
+
 function addUrls(set: Set<string>, urls: (string | null | undefined)[]): void {
     for (const u of urls) {
         if (!u) continue;
@@ -66,14 +70,14 @@ async function fetchReferencedPaths(supabase: ReturnType<typeof createClient>): 
     for (;;) {
         const { data, error } = await supabase
             .from('memories')
-            .select('image_url')
+            .select('image_url, thumb_uri')
             .is('deleted_at', null)
             .range(from, from + PAGE - 1);
         if (error) throw new Error(`memories: ${error.message}`);
         if (!data?.length) break;
         addUrls(
             refs,
-            data.map((r: { image_url?: string }) => r.image_url),
+            data.flatMap((r) => [asUrl(r.image_url), asUrl(r.thumb_uri)]),
         );
         if (data.length < PAGE) break;
         from += PAGE;

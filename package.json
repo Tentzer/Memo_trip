@@ -10,7 +10,8 @@
     "web": "expo start --web",
     "lint": "expo lint",
     "postinstall": "patch-package",
-    "test:plan-agent": "npx --yes deno test --allow-env ./supabase/functions/plan-agent/geo_test.ts ./supabase/functions/plan-agent/locality_filter_test.ts",
+    "test:plan-agent": "npx --yes deno test --allow-env --config supabase/functions/deno.json ./supabase/functions/plan-agent/ ./supabase/functions/_shared/",
+    "backfill:memory-thumbs": "node scripts/backfill-memory-thumbnails.mjs",
     "backfill:memory-geo": "node scripts/backfill-memory-country-address-once.mjs",
     "purge:soft-deleted-memos": "node scripts/purge-soft-deleted-memos-once.mjs",
     "update:preview": "eas update --channel preview --platform ios && eas update --channel preview --platform android",
@@ -70,6 +71,7 @@
     "eas-cli": "^19.0.5",
     "eslint": "^9.25.0",
     "eslint-config-expo": "~10.0.0",
+    "imagescript": "^3.6.0",
     "patch-package": "^8.0.1",
     "typescript": "~5.9.2"
   },

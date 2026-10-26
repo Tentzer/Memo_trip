@@ -66,6 +66,7 @@ def photo_to_video_url(url: str) -> str:
 
 
 def _get_cookies_path() -> str | None:
+    """Gallery-dl cookies from Modal env only (GALLERY_DL_* or YDL_COOKIES*)."""
     global _cookies_tmp_path
 
     explicit = (
