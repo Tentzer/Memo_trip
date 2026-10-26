@@ -87,7 +87,9 @@ export function useMemoryCRUD({
         const result = await uploadPicture(photoUri, lat, lng, tempId, country, user.id);
         if (result) {
             setMemories(prev => prev.map(m =>
-                m.id === tempId ? { ...m, id: result.persistedId, uri: result.publicUrl } : m
+                m.id === tempId
+                    ? { ...m, id: result.persistedId, uri: result.publicUrl, thumb_uri: result.thumbUrl }
+                    : m
             ));
         }
     }, [user, setMemories]);
@@ -207,6 +209,7 @@ export function useMemoryCRUD({
                         ...m,
                         id: result.persistedId,
                         uri: result.publicUrl,
+                        thumb_uri: result.thumbUrl,
                         customFolderIds: persistedFolderIds,
                         placeCategory,
                     }
