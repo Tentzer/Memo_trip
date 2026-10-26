@@ -13,6 +13,8 @@ export type MemoryPlaceCategory =
 export interface Memory {
     id: string;
     uri: string;
+    /** Map-pin thumbnail. Pins fall back to `uri` when this is missing. */
+    thumb_uri?: string;
     latitude: number;
     longitude: number;
     created_at: string;

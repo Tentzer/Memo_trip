@@ -42,6 +42,13 @@ function coalescePlaceCategory(
     return normalizePlaceCategory(dbValue) ?? metaValue;
 }
 
+/** Client read of the optional thumb_uri column. Generation stays server-side. */
+function readThumbUri(value: unknown): string | undefined {
+    if (typeof value !== 'string') return undefined;
+    const trimmed = value.trim();
+    return trimmed ? trimmed : undefined;
+}
+
 /** One-time migration path: push legacy AsyncStorage-only import fields to Postgres for owned rows. */
 async function backfillImportColumnsFromLocalMeta(
     userId: string,
@@ -312,6 +319,7 @@ export async function buildFormattedMemories(
             return {
                 id: memoryId,
                 uri: item.image_url,
+                thumb_uri: readThumbUri(item.thumb_uri),
                 latitude: item.latitude,
                 longitude: item.longitude,
                 created_at: item.created_at ?? new Date().toISOString(),
