@@ -4,6 +4,7 @@ import {
     type GoogleAddressComponent,
 } from '@/lib/geocoding';
 import { mapGooglePlaceCategory } from '@/lib/places/placeCategorySignals';
+import { MAX_PLACE_PHOTOS } from '@/lib/places/placePhotos';
 import type { PlaceDetails, PlacePrediction } from '@/lib/places/types';
 
 export type { PlaceDetails as GooglePlaceDetails, PlacePrediction };
@@ -137,18 +138,35 @@ export async function fetchGooglePlaceDetails(
         reviewCount: typeof result.user_ratings_total === 'number' ? result.user_ratings_total : undefined,
         placeId,
         category: mapGooglePlaceCategory({ name, primaryType, types, description }),
+        placePhotos: [],
     };
+}
+
+export async function fetchGooglePlacePhotoReferences(
+    placeId: string,
+    googleApiKey: string | undefined,
+): Promise<string[]> {
+    if (!googleApiKey) return [];
+    const response = await fetch(
+        `https://maps.googleapis.com/maps/api/place/details/json?place_id=${encodeURIComponent(placeId)}&fields=photos&key=${googleApiKey}`
+    );
+    const data = await response.json();
+    const photos = data.result?.photos;
+    if (!Array.isArray(photos)) return [];
+    const references: string[] = [];
+    for (const photo of photos) {
+        const reference = photo?.photo_reference;
+        if (typeof reference !== 'string' || !reference.trim()) continue;
+        references.push(reference);
+        if (references.length >= MAX_PLACE_PHOTOS) break;
+    }
+    return references;
 }
 
 export async function fetchGooglePlacePhotoReference(
     placeId: string,
     googleApiKey: string | undefined,
 ): Promise<string | null> {
-    if (!googleApiKey) return null;
-    const response = await fetch(
-        `https://maps.googleapis.com/maps/api/place/details/json?place_id=${encodeURIComponent(placeId)}&fields=photos&key=${googleApiKey}`
-    );
-    const data = await response.json();
-    const reference = data.result?.photos?.[0]?.photo_reference;
-    return typeof reference === 'string' && reference.trim() ? reference : null;
+    const references = await fetchGooglePlacePhotoReferences(placeId, googleApiKey);
+    return references[0] ?? null;
 }

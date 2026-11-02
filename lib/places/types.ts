@@ -1,5 +1,9 @@
 import type { MemoryPlaceCategory } from '@/types/memory';
 
+import type { PlacePhoto } from './placePhotos.ts';
+
+export type { PlacePhoto } from './placePhotos.ts';
+
 export interface PlacePrediction {
     place_id: string;
     description: string;
@@ -33,6 +37,8 @@ export interface PlaceDetails {
     website?: string;
     hours?: string;
     placeId?: string;
+    /** Up to 5 gallery images. Empty until a place sheet loads details. */
+    placePhotos: PlacePhoto[];
 }
 
 export interface PlaceBias {

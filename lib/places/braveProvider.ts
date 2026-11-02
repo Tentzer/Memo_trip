@@ -43,7 +43,7 @@ async function withCountry(place: PlaceDetails): Promise<PlaceDetails> {
         undefined,
         googleKey(),
     );
-    return { ...place, country };
+    return { ...place, country, placePhotos: place.placePhotos ?? [] };
 }
 
 function detailsFromHint(placeId: string, hint: PlaceLookupHint): PlaceDetails | null {
@@ -62,6 +62,7 @@ function detailsFromHint(placeId: string, hint: PlaceLookupHint): PlaceDetails |
         website: hint.website,
         hours: hint.hours,
         placeId,
+        placePhotos: [],
     };
 }
 

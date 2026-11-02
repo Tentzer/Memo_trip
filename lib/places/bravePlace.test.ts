@@ -45,6 +45,10 @@ describe('mapBravePlace', () => {
             website: 'https://sushidai.example',
             hours: 'Monday: 11:00-14:00',
             photoUrls: ['https://img.example/1.jpg', 'https://img.example/3.jpg'],
+            placePhotos: [
+                { thumb: 'https://img.example/1.jpg', full: 'https://img.example/1.jpg' },
+                { thumb: 'https://img.example/3.jpg', full: 'https://img.example/3.jpg' },
+            ],
         });
     });
 

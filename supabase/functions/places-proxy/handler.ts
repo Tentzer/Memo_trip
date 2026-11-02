@@ -111,6 +111,7 @@ function placePayload(place: MappedBravePlace) {
         website: place.website,
         hours: place.hours,
         placeId: place.placeId,
+        placePhotos: place.placePhotos,
     };
 }
 

@@ -15,7 +15,13 @@ const SUSHI = {
     },
     contact: { telephone: '+81 3-0000-0000' },
     rating: { ratingValue: 4.6, bestRating: 5, reviewCount: 12 },
-    pictures: { results: [{ src: 'https://img.example/1.jpg' }, { src: 'https://img.example/2.jpg' }] },
+    pictures: {
+        results: [
+            { src: 'https://imgs.search.brave.com/thumb-1', original: 'https://cdn.example/full-1.jpg' },
+            { src: 'https://imgs.search.brave.com/thumb-2' },
+            { src: 'https://imgs.search.brave.com/logo', logo: true },
+        ],
+    },
     serves_cuisine: ['Japanese'],
     categories: ['restaurant'],
 };
@@ -112,7 +118,9 @@ Deno.test('photos after search reuse the cached picture urls', async () => {
         placeId: 'loc4G4LX7WYT25AUBNMX',
     }), harness);
     assertEquals(photos.status, 200);
-    assertEquals(await photos.json(), { photos: ['https://img.example/1.jpg', 'https://img.example/2.jpg'] });
+    assertEquals(await photos.json(), {
+        photos: ['https://imgs.search.brave.com/thumb-1', 'https://imgs.search.brave.com/thumb-2'],
+    });
     assertEquals(harness.calls.length, 1);
 });
 
@@ -131,4 +139,8 @@ Deno.test('details can be recovered from title and coordinates when the id misse
     assertEquals(body.place.title, 'Sushi Dai');
     assertEquals(body.place.address, '5-2-1 Tsukiji, Tokyo');
     assertEquals(body.place.photoReference, null);
+    assertEquals(body.place.placePhotos, [
+        { thumb: 'https://imgs.search.brave.com/thumb-1', full: 'https://cdn.example/full-1.jpg' },
+        { thumb: 'https://imgs.search.brave.com/thumb-2', full: 'https://imgs.search.brave.com/thumb-2' },
+    ]);
 });

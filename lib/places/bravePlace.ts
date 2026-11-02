@@ -2,6 +2,7 @@ import type { MemoryPlaceCategory } from '../../types/memory.ts';
 
 import { mapBravePlaceCategory } from './placeCategorySignals.ts';
 import { syntheticBravePlaceId } from './placeId.ts';
+import { mapBravePlacePhotos, type PlacePhoto } from './placePhotos.ts';
 
 export interface BraveDayHours {
     abbr_name?: string;
@@ -24,7 +25,7 @@ export interface BravePlaceResult {
     };
     contact?: { telephone?: string };
     rating?: { ratingValue?: number; bestRating?: number; reviewCount?: number };
-    pictures?: { results?: { src?: string; logo?: boolean; duplicated?: boolean }[] };
+    pictures?: { results?: { src?: string; original?: string; logo?: boolean; duplicated?: boolean }[] };
     categories?: string[];
     icon_category?: string;
     serves_cuisine?: string[];
@@ -47,6 +48,7 @@ export interface MappedBravePlace {
     website?: string;
     hours?: string;
     photoUrls: string[];
+    placePhotos: PlacePhoto[];
 }
 
 export interface BraveSearchInput {
@@ -152,6 +154,7 @@ export function mapBravePlace(result: BravePlaceResult): MappedBravePlace | null
         website,
         hours: formatHours(result.opening_hours),
         photoUrls: photoUrls(result),
+        placePhotos: mapBravePlacePhotos(result.pictures?.results),
     };
 }
 
