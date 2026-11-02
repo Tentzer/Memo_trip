@@ -8,10 +8,11 @@ import {
     saveDismissedImports,
     type DismissedImportSets,
 } from '@/lib/dismissedVideoImports';
-import { fetchGooglePlaceDetails, fetchGooglePlacePredictions } from '@/lib/googlePlaces';
+import { resolvePlaceQuery } from '@/lib/places/resolvePlace';
 import { serverErrorFromBody, userMessageForStatus } from '@/lib/paidEndpointError';
 import { consumeDirectImportHandoff } from '@/lib/shareExtensionAuthSync';
 import { supabase } from '@/lib/supabase';
+import type { MemoryPlaceCategory } from '@/types/memory';
 import type { ModalImportResult, ModalPlace } from '@/types/videoImport';
 import React, {
     createContext,
@@ -25,10 +26,8 @@ import React, {
 import { AppState } from 'react-native';
 import { useAuth } from './AuthContext';
 
-const GOOGLE_API_KEY = process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY;
 const SUPABASE_URL = process.env.EXPO_PUBLIC_SUPABASE_URL ?? '';
 const SUPABASE_ANON_KEY = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY ?? '';
-const PLACEHOLDER_PHOTO = 'https://placehold.co/400x400/e2e8f0/94a3b8.png?text=?';
 /** Orphaned server jobs (edge wall-clock killed background work without updating the row). */
 const STALE_JOB_MS = 10 * 60 * 1000;
 const STALE_JOB_ERROR =
@@ -53,6 +52,7 @@ export interface ResolvedPlaceData {
     photoReference: string | null;
     photoUri: string;
     country: string | null;
+    category?: MemoryPlaceCategory;
 }
 
 export type ImportJobStatus = 'loading' | 'done' | 'error';
@@ -194,7 +194,7 @@ export function ImportQueueProvider({ children }: { children: React.ReactNode })
         });
     }, [user]);
 
-    // ── Google Places resolution (still client-side) ──────────────────────────
+    // ── Place resolution (Brave or Google, via the places provider) ───────────
 
     const resolvePlacesForJob = useCallback(async (jobId: string, places: ModalPlace[]) => {
         if (resolvingPlacesJobIdsRef.current.has(jobId)) return;
@@ -208,39 +208,20 @@ export function ImportQueueProvider({ children }: { children: React.ReactNode })
             for (const place of pending) {
                 const key = place.maps_search_hint;
                 try {
-                    const predictions = await fetchGooglePlacePredictions(place.maps_search_hint, GOOGLE_API_KEY);
-                    const first = predictions[0];
-                    if (!first) {
+                    const resolved = await resolvePlaceQuery(place.maps_search_hint, place.name, 800);
+                    if (!resolved) {
                         setJobs(prev => prev.map(j => j.id === jobId
                             ? { ...j, resolvedPlaces: { ...j.resolvedPlaces, [key]: null } }
                             : j
                         ));
                         continue;
                     }
-                    const details = await fetchGooglePlaceDetails(first.place_id, place.name, GOOGLE_API_KEY);
-                    if (!details) {
-                        setJobs(prev => prev.map(j => j.id === jobId
-                            ? { ...j, resolvedPlaces: { ...j.resolvedPlaces, [key]: null } }
-                            : j
-                        ));
-                        continue;
-                    }
-                    const photoUri = details.photoReference && GOOGLE_API_KEY
-                        ? `https://maps.googleapis.com/maps/api/place/photo?maxwidth=800&photo_reference=${details.photoReference}&key=${GOOGLE_API_KEY}`
-                        : PLACEHOLDER_PHOTO;
                     setJobs(prev => prev.map(j => j.id === jobId
                         ? {
                             ...j,
                             resolvedPlaces: {
                                 ...j.resolvedPlaces,
-                                [key]: {
-                                    placeId: first.place_id,
-                                    lat: details.latitude,
-                                    lng: details.longitude,
-                                    photoReference: details.photoReference,
-                                    photoUri,
-                                    country: details.country,
-                                },
+                                [key]: resolved,
                             },
                         }
                         : j

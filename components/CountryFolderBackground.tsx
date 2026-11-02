@@ -30,7 +30,8 @@ export default function CountryFolderBackground({ countryName, memoCount, footer
                 source={source}
                 style={StyleSheet.absoluteFillObject}
                 contentFit="cover"
-                cachePolicy="memory"
+                placeholder={defaultCountryPhoto}
+                cachePolicy="memory-disk"
                 transition={0}
                 recyclingKey={`country-${countryName}`}
                 onError={onError}

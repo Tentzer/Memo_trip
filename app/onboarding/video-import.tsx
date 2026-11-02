@@ -3,14 +3,15 @@ import { useAuth } from '@/context/AuthContext';
 import { type ImportJob, type ResolvedPlaceData, useImportQueue } from '@/context/ImportQueueContext';
 import { useMemories } from '@/context/MemoryContext';
 import { useAppTheme } from '@/context/ThemeContext';
-import { fetchGooglePlaceDetails, fetchGooglePlacePredictions } from '@/lib/googlePlaces';
 import { hasDuplicateInCountryFolder } from '@/lib/placeMemoryDuplicate';
+import { resolvePlaceQuery } from '@/lib/places/resolvePlace';
 import { alertRequireSignIn } from '@/lib/requireSignInAlert';
 import { SHARE_VIDEO_URL_PATTERN } from '@/lib/extractShareVideoUrl';
 import { rtlAwareTextStyle } from '@/lib/textDirection';
 import type { ModalPlace } from '@/types/videoImport';
-import { normalizePlaceCategory } from '@/lib/placeCategory';
+import { resolvePlaceCategoryForSave } from '@/lib/placeCategory';
 import { Ionicons } from '@expo/vector-icons';
+import { useBottomTabBarHeight } from '@react-navigation/bottom-tabs';
 import { useFocusEffect } from 'expo-router';
 import React, { useCallback, useMemo, useState } from 'react';
 import {
@@ -27,8 +28,6 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-const PLACEHOLDER_PHOTO = 'https://placehold.co/400x400/e2e8f0/94a3b8.png?text=?';
-const GOOGLE_API_KEY = process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY;
 const PLATFORMS = ['TikTok', 'Instagram', 'Facebook'];
 
 interface BatchProps {
@@ -142,6 +141,7 @@ function ImportBatch({ job, savingKey, saveErrors, onAdd, onAddAll, onRetry, onD
 export default function VideoImportScreen() {
     const { user } = useAuth();
     const { theme } = useAppTheme();
+    const tabBarHeight = useBottomTabBarHeight();
     const styles = useMemo(() => createStyles(theme.colors), [theme.colors]);
     const { jobs, enqueueUrl, retryJob, markSaved, removeJob, clearDoneJobs, refreshJobs } = useImportQueue();
     const { addPlaceMemory, memories } = useMemories();
@@ -159,22 +159,9 @@ export default function VideoImportScreen() {
     const isValidUrl = useMemo(() => SHARE_VIDEO_URL_PATTERN.test(urlInput), [urlInput]);
 
     const resolvePlace = useCallback(async (place: ModalPlace): Promise<ResolvedPlaceData> => {
-        const predictions = await fetchGooglePlacePredictions(place.maps_search_hint, GOOGLE_API_KEY);
-        const first = predictions[0];
-        if (!first) throw new Error(`"${place.name}" not found on Google Maps.`);
-        const details = await fetchGooglePlaceDetails(first.place_id, place.name, GOOGLE_API_KEY);
-        if (!details) throw new Error(`Could not load details for "${place.name}".`);
-        const photoUri = details.photoReference && GOOGLE_API_KEY
-            ? `https://maps.googleapis.com/maps/api/place/photo?maxwidth=1200&photo_reference=${details.photoReference}&key=${GOOGLE_API_KEY}`
-            : PLACEHOLDER_PHOTO;
-        return {
-            placeId: first.place_id,
-            lat: details.latitude,
-            lng: details.longitude,
-            photoReference: details.photoReference,
-            photoUri,
-            country: details.country,
-        };
+        const resolved = await resolvePlaceQuery(place.maps_search_hint, place.name);
+        if (!resolved) throw new Error(`"${place.name}" not found.`);
+        return resolved;
     }, []);
 
     const handleAdd = useCallback(async (job: ImportJob, place: ModalPlace) => {
@@ -209,7 +196,7 @@ export default function VideoImportScreen() {
                 {
                     source: 'video_import',
                     sourceUrl: job.url,
-                    placeCategory: normalizePlaceCategory(place.category),
+                    placeCategory: resolvePlaceCategoryForSave(place.category, resolved.category),
                 },
             );
             markSaved(job.id, key);
@@ -261,7 +248,7 @@ export default function VideoImportScreen() {
                 keyboardVerticalOffset={0}
             >
                 {jobs.length === 0 ? (
-                    <View style={styles.emptyState}>
+                    <View style={[styles.emptyState, { paddingBottom: tabBarHeight }]}>
                         <Ionicons name="film-outline" size={52} color={theme.colors.borderStrong} />
                         <Text style={styles.emptyTitle}>Import from a video</Text>
                         <Text style={styles.emptySubtitle}>
@@ -302,7 +289,7 @@ export default function VideoImportScreen() {
                     </ScrollView>
                 )}
 
-                <View style={styles.inputBar}>
+                <View style={[styles.inputBar, { marginBottom: tabBarHeight }]}>
                     <View style={styles.inputWrapper}>
                         <TextInput
                             style={styles.input}

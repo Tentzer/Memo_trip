@@ -1,4 +1,6 @@
-import { compressLocalImageForUpload, createPinThumbnail } from '@/lib/imageCompress';
+import { compressLocalImageForUpload, preparePinThumbnail } from '@/lib/imageCompress';
+import { memoryCoverFields } from '@/lib/memoryCover';
+import { isPlaceholderPhoto } from '@/lib/places/saveSearchedPlace';
 import { uploadMemoryJpeg } from '@/lib/memoryBucket';
 import { getCountryNameFromCoords, normalizeLocationFolderName, toFolderLookupKey } from '@/lib/geocoding';
 import {
@@ -7,7 +9,7 @@ import {
     loadMemoryMeta,
     saveMemoryMeta,
 } from '@/lib/memoryStorage';
-import { normalizePlaceCategory } from '@/lib/placeCategory';
+import { normalizePlaceCategory, resolvePlaceCategoryForSave } from '@/lib/placeCategory';
 import { supabase } from '@/lib/supabase';
 import { CustomFolder, Memory, MemoryMeta } from '@/types/memory';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -358,15 +360,29 @@ export async function uploadPicture(
 ): Promise<{ persistedId: string; publicUrl: string; thumbUrl: string | null } | null> {
     try {
         const fileName = `${tempId}.jpg`;
-        const uriForUpload = await compressLocalImageForUpload(photoUri);
-        const publicUrl = await uploadMemoryJpeg(fileName, uriForUpload);
-
+        const cover = memoryCoverFields(photoUri);
+        let publicUrl: string;
         let thumbUrl: string | null = null;
-        try {
-            const thumbLocalUri = await createPinThumbnail(uriForUpload);
-            thumbUrl = await uploadMemoryJpeg(`thumbs/${tempId}.jpg`, thumbLocalUri);
-        } catch (thumbError) {
-            console.error('Pin thumbnail upload failed:', thumbError);
+
+        if (isPlaceholderPhoto(photoUri)) {
+            publicUrl = cover.uri;
+            thumbUrl = null;
+        } else if (cover.thumbUri) {
+            publicUrl = cover.uri;
+            thumbUrl = cover.thumbUri;
+        } else {
+            const uriForUpload = await compressLocalImageForUpload(photoUri);
+            publicUrl = await uploadMemoryJpeg(fileName, uriForUpload);
+            try {
+                const prepared = await preparePinThumbnail(uriForUpload);
+                if ('fallbackUrl' in prepared) {
+                    thumbUrl = prepared.fallbackUrl;
+                } else {
+                    thumbUrl = await uploadMemoryJpeg(`thumbs/${tempId}.jpg`, prepared.uploadUri);
+                }
+            } catch (thumbError) {
+                console.error('Pin thumbnail upload failed:', thumbError);
+            }
         }
 
         const titleVal = options?.title?.trim() || null;
@@ -378,10 +394,10 @@ export async function uploadPicture(
             options?.source ?? tempMetaBefore?.source ?? null;
         const resolvedSourceUrl =
             (options?.sourceUrl ?? tempMetaBefore?.sourceUrl)?.trim() || null;
-        const resolvedPlaceCategory =
-            normalizePlaceCategory(options?.placeCategory)
-            ?? normalizePlaceCategory(tempMetaBefore?.placeCategory)
-            ?? null;
+        const resolvedPlaceCategory = resolvePlaceCategoryForSave(
+            tempMetaBefore?.placeCategory,
+            options?.placeCategory,
+        ) ?? null;
 
         const { data: insertedMemory, error: dbError } = await supabase
             .from('memories')

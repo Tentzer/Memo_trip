@@ -1,8 +1,12 @@
-import {
-    fetchGooglePlaceDetails,
-    fetchGooglePlacePredictions,
-    type PlacePrediction,
-} from '@/lib/googlePlaces';
+import { getPlacesClient } from '@/lib/places/client';
+import { hintForPrediction } from '@/lib/places/braveProvider';
+import { placePhotoUri } from '@/lib/places/placePhoto';
+import { selectSearchedPlace } from '@/lib/places/selectPlace';
+import { coverUriFromPrediction, isPlaceholderPhoto, PLACEHOLDER_PLACE_PHOTO, resolveSearchCoverUri } from '@/lib/places/saveSearchedPlace';
+import { resolvePlaceCountry } from '@/lib/googlePlaces';
+import { PLACE_SEARCH_DEBOUNCE_MS } from '@/lib/places/providerName';
+import type { PlacePrediction } from '@/lib/places/types';
+import type { MemoryPlaceCategory } from '@/types/memory';
 import { latitudeForMarkerViewportCenter } from '@/lib/mapCamera';
 import { fetchWalkingRoutePreview } from '@/lib/routing';
 import { alertRequireSignIn } from '@/lib/requireSignInAlert';
@@ -36,7 +40,7 @@ export const useMapLogic = (
         country: string,
         description?: string,
         title?: string,
-        options?: { customFolderIds?: string[] }
+        options?: { customFolderIds?: string[]; placeCategory?: MemoryPlaceCategory; placeId?: string }
     ) => Promise<void>,
     onMarkerActionPress?: (memory: Memory) => void
 ) => {
@@ -100,7 +104,10 @@ export const useMapLogic = (
         setShowMemoriesOnMap(true);
     }, [cancelShowMemoriesDefer]);
 
-    useEffect(() => () => cancelShowMemoriesDefer(), [cancelShowMemoriesDefer]);
+    useEffect(() => () => {
+        cancelShowMemoriesDefer();
+        if (searchTimerRef.current) clearTimeout(searchTimerRef.current);
+    }, [cancelShowMemoriesDefer]);
     const [isGalleryVisible, setIsGalleryVisible] = useState(false);
     const [isCountryLibraryVisible, setIsCountryLibraryVisible] = useState(false);
     const [isShareMemoryVisible, setIsShareMemoryVisible] = useState(false);
@@ -112,6 +119,12 @@ export const useMapLogic = (
     const [isNoPhotoDescriptionVisible, setIsNoPhotoDescriptionVisible] = useState(false);
     const [missingPhotoDescription, setMissingPhotoDescription] = useState('');
     const [selectedPlaceTitle, setSelectedPlaceTitle] = useState<string | null>(null);
+    const [selectedPlaceCategory, setSelectedPlaceCategory] = useState<MemoryPlaceCategory | undefined>(undefined);
+    const searchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const searchSeqRef = useRef(0);
+    const selectionSeqRef = useRef(0);
+    const selectedPredictionRef = useRef<PlacePrediction | null>(null);
+    const promptedPlaceSignInRef = useRef(false);
 
     const { user } = useAuth();
     const GOOGLE_API_KEY = process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY;
@@ -168,41 +181,120 @@ export const useMapLogic = (
         }
     }, [getLocation, animateMapTo]);
 
-    const fetchPlaces = useCallback(async (text: string) => {
+    const fetchPlaces = useCallback((text: string) => {
         setSearchQuery(text);
         setUserChoseAddress(false);
         setSelectedPlacePhotoRef(null);
         setSelectedPlaceCountry(null);
-        if (text.length < 3) {
+        setSelectedPlaceCategory(undefined);
+        if (searchTimerRef.current) clearTimeout(searchTimerRef.current);
+        if (text.trim().length < 3) {
+            searchSeqRef.current += 1;
             setSearchResults([]);
             return;
         }
-        try {
-            const predictions = await fetchGooglePlacePredictions(text, GOOGLE_API_KEY);
-            setSearchResults(predictions);
-        } catch (error) {
-            console.log(error);
+        const seq = ++searchSeqRef.current;
+        searchTimerRef.current = setTimeout(() => {
+            void (async () => {
+                try {
+                    const coords = locationRef.current?.coords;
+                    const predictions = await getPlacesClient().search(text, coords
+                        ? { latitude: coords.latitude, longitude: coords.longitude }
+                        : undefined);
+                    if (seq !== searchSeqRef.current) return;
+                    setSearchResults(predictions);
+                } catch (error) {
+                    console.log(error);
+                    const message = error instanceof Error ? error.message : '';
+                    if (message.toLowerCase().includes('sign in') && !promptedPlaceSignInRef.current) {
+                        promptedPlaceSignInRef.current = true;
+                        alertRequireSignIn(message);
+                    }
+                }
+            })();
+        }, PLACE_SEARCH_DEBOUNCE_MS);
+    }, []);
+
+    const showSelectedPlace = useCallback((
+        latitude: number,
+        longitude: number,
+        title: string,
+        query: string,
+        category: MemoryPlaceCategory | undefined,
+        coverUri: string | null,
+    ) => {
+        setSelectedPlaceTitle(title);
+        setSelectedPlaceCategory(category);
+        setSelectedPlacePhotoRef(coverUri);
+        setSelectedPlaceCountry(null);
+        setShowRoute(false);
+        setDestinationLatitude(latitude);
+        setDestinationLongitude(longitude);
+        setSearchResults([]);
+        setSearchQuery(query);
+        setUserChoseAddress(true);
+        Keyboard.dismiss();
+        animateMapTo(latitude, longitude, USER_MAP_ZOOM_DELTA, 'memo-pin');
+    }, [animateMapTo]);
+
+    const handleSelectPlace = useCallback((prediction: PlacePrediction) => {
+        const seq = ++selectionSeqRef.current;
+        const selected = selectSearchedPlace(prediction);
+        if (selected) {
+            selectedPredictionRef.current = prediction;
+            showSelectedPlace(
+                selected.latitude,
+                selected.longitude,
+                selected.title,
+                selected.query,
+                selected.category,
+                coverUriFromPrediction(prediction),
+            );
+            const placeId = selected.placeId;
+            void (async () => {
+                try {
+                    const country = await resolvePlaceCountry(
+                        selected.latitude,
+                        selected.longitude,
+                        undefined,
+                        GOOGLE_API_KEY,
+                    );
+                    if (selectionSeqRef.current !== seq) return;
+                    if (country) setSelectedPlaceCountry(country);
+                    const photos = await getPlacesClient().photos(placeId, hintForPrediction(prediction));
+                    if (selectionSeqRef.current !== seq) return;
+                    if (photos[0]) setSelectedPlacePhotoRef(photos[0]);
+                } catch (error) {
+                    console.log(error);
+                }
+            })();
+            return;
         }
-    }, [GOOGLE_API_KEY]);
 
-    const handleSelectPlace = useCallback(async (placeId: string, description: string) => {
-        const place = await fetchGooglePlaceDetails(placeId, description, GOOGLE_API_KEY);
-
-        if (place) {
-            setSelectedPlaceTitle(place.title);
-            setSelectedPlacePhotoRef(place.photoReference);
-            setSelectedPlaceCountry(place.country);
-            setShowRoute(false);
-            setDestinationLatitude(place.latitude);
-            setDestinationLongitude(place.longitude);
-            setSearchResults([]);
-            setSearchQuery(description);
-            setUserChoseAddress(true);
-            Keyboard.dismiss();
-
-            animateMapTo(place.latitude, place.longitude, USER_MAP_ZOOM_DELTA, 'memo-pin');
-        }
-    }, [GOOGLE_API_KEY, animateMapTo]);
+        void (async () => {
+            try {
+                const hint = hintForPrediction(prediction);
+                const client = getPlacesClient();
+                const place = await client.details(prediction.place_id, hint);
+                if (selectionSeqRef.current !== seq || !place) return;
+                selectedPredictionRef.current = prediction;
+                showSelectedPlace(
+                    place.latitude,
+                    place.longitude,
+                    place.title,
+                    prediction.description,
+                    place.category ?? prediction.category,
+                    coverUriFromPrediction(prediction) ?? place.photoReference,
+                );
+                setSelectedPlaceCountry(place.country);
+                const photos = await client.photos(prediction.place_id, hint);
+                if (selectionSeqRef.current !== seq) return;
+                if (photos[0]) setSelectedPlacePhotoRef(photos[0]);
+            } catch (error) {
+                console.log(error);
+            }
+        })();
+    }, [GOOGLE_API_KEY, showSelectedPlace]);
 
     const getPlaceRoute = useCallback(async (lat?: number, lng?: number): Promise<boolean> => {
         if (!location?.coords) {
@@ -284,16 +376,18 @@ export const useMapLogic = (
 
     const handleMarkerPress = useCallback((memory: Memory) => {
         setUserChoseAddress(false);
-        setMemoryToShare(memory);
         onMarkerActionPress?.(memory);
     }, [onMarkerActionPress]);
 
     const handleClearSearch = useCallback(() => {
+        if (searchTimerRef.current) clearTimeout(searchTimerRef.current);
+        searchSeqRef.current += 1;
         setSearchQuery('');
         setSearchResults([]);
         setUserChoseAddress(false);
         setSelectedPlacePhotoRef(null);
         setSelectedPlaceCountry(null);
+        setSelectedPlaceCategory(undefined);
         setIsNoPhotoDescriptionVisible(false);
         setMissingPhotoDescription('');
         setSelectedPlaceTitle(null);
@@ -307,10 +401,15 @@ export const useMapLogic = (
             return;
         }
 
-        const PLACEHOLDER_URL = 'https://placehold.co/400x400/e2e8f0/94a3b8.png?text=?';
-        const photoUri = selectedPlacePhotoRef
-            ? `https://maps.googleapis.com/maps/api/place/photo?maxwidth=1200&photo_reference=${selectedPlacePhotoRef}&key=${GOOGLE_API_KEY}`
-            : PLACEHOLDER_URL;
+        const prediction = selectedPredictionRef.current;
+        const readyCover = placePhotoUri(selectedPlacePhotoRef, GOOGLE_API_KEY);
+        const photoUri = readyCover && !isPlaceholderPhoto(readyCover)
+            ? readyCover
+            : (prediction
+                ? await resolveSearchCoverUri(prediction, (row) => (
+                    getPlacesClient().photos(row.place_id, hintForPrediction(row))
+                ))
+                : PLACEHOLDER_PLACE_PHOTO);
 
         const country = selectedPlaceCountry ?? '';
         const lat = destinationLatitude;
@@ -324,7 +423,10 @@ export const useMapLogic = (
 
         setIsAddingPlace(true);
         try {
-            await addPlaceMemory(photoUri, lat, lng, country, description, title);
+            await addPlaceMemory(photoUri, lat, lng, country, description, title, {
+                placeCategory: selectedPlaceCategory,
+                placeId: prediction?.place_id,
+            });
             handleClearSearch();
         } catch {
             Alert.alert('Error', 'Could not save the memory. Please try again.');
@@ -339,18 +441,14 @@ export const useMapLogic = (
         destinationLongitude,
         GOOGLE_API_KEY,
         selectedPlaceTitle,
+        selectedPlaceCategory,
         addPlaceMemory,
         handleClearSearch,
     ]);
 
     const addSelectedPlaceAsMemory = useCallback(async () => {
-        if (!selectedPlacePhotoRef) {
-            setMissingPhotoDescription('');
-            setIsNoPhotoDescriptionVisible(true);
-            return;
-        }
         await saveSelectedPlaceMemory();
-    }, [selectedPlacePhotoRef, saveSelectedPlaceMemory]);
+    }, [saveSelectedPlaceMemory]);
 
     const closeNoPhotoDescriptionPrompt = useCallback(() => {
         setIsNoPhotoDescriptionVisible(false);

@@ -2,7 +2,7 @@ import { PlacePrediction } from '@/hooks/useMapLogic';
 import { useAppTheme } from '@/context/ThemeContext';
 import { Ionicons } from '@expo/vector-icons';
 import React from 'react';
-import { StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 /** Matches `h-12` on the search row — keep in sync with Home menu placement below the bar. */
@@ -14,7 +14,7 @@ interface Props {
     searchResults: PlacePrediction[];
     fetchPlaces: (text: string) => void;
     onClearSearch: () => void;
-    handleSelectPlace: (placeId: string, description: string) => void;
+    handleSelectPlace: (place: PlacePrediction) => void;
 }
 
 export default function SearchBar({
@@ -74,17 +74,21 @@ export default function SearchBar({
             )}
 
             {searchResults.length > 0 && (
-                <View style={[styles.results, { backgroundColor: theme.colors.surfaceElevated, shadowColor: theme.colors.shadow }]}>
+                <ScrollView
+                    keyboardShouldPersistTaps="handled"
+                    keyboardDismissMode="none"
+                    style={[styles.results, { backgroundColor: theme.colors.surfaceElevated, shadowColor: theme.colors.shadow }]}
+                >
                     {searchResults.map((item) => (
                         <TouchableOpacity
                             key={item.place_id}
                             style={[styles.resultRow, { borderBottomColor: theme.colors.border }]}
-                            onPress={() => handleSelectPlace(item.place_id, item.description)}
+                            onPress={() => handleSelectPlace(item)}
                         >
                             <Text style={{ color: theme.colors.text }}>{item.description}</Text>
                         </TouchableOpacity>
                     ))}
-                </View>
+                </ScrollView>
             )}
         </View>
     );

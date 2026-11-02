@@ -1,7 +1,7 @@
-import type { Memory } from '@/types/memory';
 import { alertRequireSignIn } from '@/lib/requireSignInAlert';
-import { useCallback, useMemo, useState } from 'react';
-import { Alert } from 'react-native';
+import type { Memory } from '@/types/memory';
+import { useCallback, useMemo, useRef, useState } from 'react';
+import { Alert, Platform } from 'react-native';
 
 type SignedInUser = { id: string } | null;
 
@@ -38,7 +38,7 @@ export function useHomeMemoActions({
 }: UseHomeMemoActionsArgs) {
     const [isInfoModalVisible, setIsInfoModalVisible] = useState(false);
     const [selectedMemoryForInfoId, setSelectedMemoryForInfoId] = useState<string | null>(null);
-    const [actionSheetMemory, setActionSheetMemory] = useState<Memory | null>(null);
+    const pendingShareRef = useRef(false);
 
     const selectedMemoryForInfo = useMemo(() => {
         if (!selectedMemoryForInfoId) return null;
@@ -46,23 +46,6 @@ export function useHomeMemoActions({
             ?? sharedLibraryMemories.find((memory) => memory.id === selectedMemoryForInfoId)
             ?? null;
     }, [selectedMemoryForInfoId, memories, sharedLibraryMemories]);
-
-    const selectedMemoryForActions = useMemo(() => {
-        if (!actionSheetMemory) return null;
-        return (
-            memories.find((memory) => memory.id === actionSheetMemory.id)
-            ?? sharedLibraryMemories.find((memory) => memory.id === actionSheetMemory.id)
-            ?? actionSheetMemory
-        );
-    }, [actionSheetMemory, memories, sharedLibraryMemories]);
-
-    const openMemoActions = useCallback((memory: Memory) => {
-        setActionSheetMemory(memory);
-    }, []);
-
-    const closeMemoActions = useCallback(() => {
-        setActionSheetMemory(null);
-    }, []);
 
     const openMemoInfo = useCallback((memory: Memory) => {
         setSelectedMemoryForInfoId(memory.id);
@@ -80,17 +63,10 @@ export function useHomeMemoActions({
         closeMemoInfo();
     }, [selectedMemoryForInfoId, selectedMemoryForInfo?.isShared, updateMemoryInfo, closeMemoInfo]);
 
-    const handleOpenInfoFromActions = useCallback(() => {
-        if (!selectedMemoryForActions) return;
-        const target = selectedMemoryForActions;
-        closeMemoActions();
-        openMemoInfo(target);
-    }, [closeMemoActions, openMemoInfo, selectedMemoryForActions]);
-
     const handleWalkToMemo = useCallback(async () => {
-        if (!selectedMemoryForActions) return;
-        const target = selectedMemoryForActions;
-        closeMemoActions();
+        if (!selectedMemoryForInfo) return;
+        const target = selectedMemoryForInfo;
+        closeMemoInfo();
         setShowSearchBar(false);
         await returnToStartingPoint({ forceRefresh: true });
         const ok = await getPlaceRoute(target.latitude, target.longitude);
@@ -99,30 +75,43 @@ export function useHomeMemoActions({
         } else {
             setShowSearchBar(true);
         }
-    }, [closeMemoActions, getPlaceRoute, returnToStartingPoint, selectedMemoryForActions, setShowRoute, setShowSearchBar]);
+    }, [closeMemoInfo, getPlaceRoute, returnToStartingPoint, selectedMemoryForInfo, setShowRoute, setShowSearchBar]);
 
     const handleDriveToMemo = useCallback(() => {
-        if (!selectedMemoryForActions) return;
-        const target = selectedMemoryForActions;
-        closeMemoActions();
+        if (!selectedMemoryForInfo) return;
+        const target = selectedMemoryForInfo;
+        closeMemoInfo();
         void openDrivingInWaze(target.latitude, target.longitude);
-    }, [closeMemoActions, openDrivingInWaze, selectedMemoryForActions]);
+    }, [closeMemoInfo, openDrivingInWaze, selectedMemoryForInfo]);
 
-    const handleShareMemoFromActions = useCallback(() => {
-        if (!selectedMemoryForActions || selectedMemoryForActions.isShared) return;
+    const handleShareMemo = useCallback(() => {
+        if (!selectedMemoryForInfo || selectedMemoryForInfo.isShared) return;
         if (!user) {
             alertRequireSignIn('Sign in to share this memo.');
             return;
         }
-        setMemoryToShare(selectedMemoryForActions);
+        const target = selectedMemoryForInfo;
+        setMemoryToShare(target);
         setShareRecipient('');
-        closeMemoActions();
-        setIsShareMemoryVisible(true);
-    }, [closeMemoActions, selectedMemoryForActions, setIsShareMemoryVisible, setMemoryToShare, setShareRecipient, user]);
+        pendingShareRef.current = true;
+        closeMemoInfo();
+        if (Platform.OS !== 'ios') {
+            pendingShareRef.current = false;
+            setIsShareMemoryVisible(true);
+        }
+    }, [
+        closeMemoInfo,
+        selectedMemoryForInfo,
+        setIsShareMemoryVisible,
+        setMemoryToShare,
+        setShareRecipient,
+        user,
+    ]);
 
-    const handleDeleteMemoFromActions = useCallback(() => {
-        if (!selectedMemoryForActions || selectedMemoryForActions.isShared) return;
-        const target = selectedMemoryForActions;
+    const handleDeleteMemo = useCallback(() => {
+        if (!selectedMemoryForInfo || selectedMemoryForInfo.isShared) return;
+        const target = selectedMemoryForInfo;
+        closeMemoInfo();
         Alert.alert(
             'Archive memo',
             'This removes the memo from your main map and country folders, but keeps it available in any libraries that still include it.',
@@ -133,23 +122,26 @@ export function useHomeMemoActions({
                     style: 'destructive',
                     onPress: () => deleteMemory(target.id),
                 },
-            ]
+            ],
         );
-    }, [deleteMemory, selectedMemoryForActions]);
+    }, [closeMemoInfo, deleteMemory, selectedMemoryForInfo]);
+
+    const handleInfoModalDismissed = useCallback(() => {
+        if (!pendingShareRef.current) return;
+        pendingShareRef.current = false;
+        setIsShareMemoryVisible(true);
+    }, [setIsShareMemoryVisible]);
 
     return {
         isInfoModalVisible,
-        actionSheetMemory,
         selectedMemoryForInfo,
-        selectedMemoryForActions,
-        openMemoActions,
-        closeMemoActions,
+        openMemoInfo,
         closeMemoInfo,
         handleSaveMemoInfo,
-        handleOpenInfoFromActions,
         handleWalkToMemo,
         handleDriveToMemo,
-        handleShareMemoFromActions,
-        handleDeleteMemoFromActions,
+        handleShareMemo,
+        handleDeleteMemo,
+        handleInfoModalDismissed,
     };
 }

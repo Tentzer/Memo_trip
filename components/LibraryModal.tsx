@@ -1,4 +1,5 @@
 import { useAuth } from '@/context/AuthContext';
+import { useLibrariesOverlay } from '@/context/LibrariesOverlayContext';
 import { type CustomFolder, type Memory } from '@/context/MemoryContext';
 import { useAppTheme } from '@/context/ThemeContext';
 import CountryFolderBackground from '@/components/CountryFolderBackground';
@@ -9,12 +10,15 @@ import {
     countryFolderName,
     UNKNOWN_COUNTRY_FOLDER,
 } from '@/lib/countryFolder';
+import { pinImageUri } from '@/lib/mapMemoryPins';
 import {
-    fetchGooglePlaceDetails,
-    fetchGooglePlacePredictions,
     type GooglePlaceDetails,
     type PlacePrediction,
 } from '@/lib/googlePlaces';
+import { getPlacesClient } from '@/lib/places/client';
+import { hintForPrediction } from '@/lib/places/braveProvider';
+import { placePhotoUri } from '@/lib/places/placePhoto';
+import { PLACE_SEARCH_DEBOUNCE_MS } from '@/lib/places/providerName';
 import {
     MEMORY_PLACE_CATEGORIES,
     placeCategoryLabel,
@@ -22,13 +26,13 @@ import {
 import type { MemoryPlaceCategory } from '@/types/memory';
 import { alertRequireSignIn } from '@/lib/requireSignInAlert';
 import { Ionicons } from '@expo/vector-icons';
+import { useBottomTabBarHeight } from '@react-navigation/bottom-tabs';
 import { Image as ExpoImage } from 'expo-image';
 import React, { startTransition, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
     Alert,
     Animated,
     BackHandler,
-    Easing,
     FlatList,
     Keyboard,
     Modal,
@@ -44,13 +48,52 @@ import {
 } from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import Reanimated, {
+    Extrapolation,
+    interpolate,
     runOnJS,
     useAnimatedStyle,
     useSharedValue,
+    withSpring,
     withTiming,
 } from 'react-native-reanimated';
 const LIBRARY_DISMISS_DRAG_THRESHOLD = 120;
 const LIBRARY_DISMISS_VELOCITY = 900;
+const LIBRARY_SHEET_SPRING = { damping: 28, stiffness: 300, mass: 1 };
+
+function LibrarySheetSkeleton() {
+    return (
+        <View style={librarySkeletonStyles.wrap}>
+            <View style={librarySkeletonStyles.handle} />
+            <View style={librarySkeletonStyles.title} />
+            <View style={librarySkeletonStyles.grid}>
+                <View style={librarySkeletonStyles.card} />
+                <View style={librarySkeletonStyles.card} />
+                <View style={librarySkeletonStyles.card} />
+                <View style={librarySkeletonStyles.card} />
+            </View>
+        </View>
+    );
+}
+
+const librarySkeletonStyles = StyleSheet.create({
+    wrap: { flex: 1, paddingHorizontal: 20, paddingTop: 16, gap: 16 },
+    handle: {
+        alignSelf: 'center',
+        width: 44,
+        height: 5,
+        borderRadius: 999,
+        backgroundColor: '#CBD5E1',
+    },
+    title: {
+        alignSelf: 'center',
+        width: 140,
+        height: 16,
+        borderRadius: 8,
+        backgroundColor: '#E2E8F0',
+    },
+    grid: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between', rowGap: 12 },
+    card: { width: '48%', aspectRatio: 1.2, borderRadius: 18, backgroundColor: '#E2E8F0' },
+});
 
 /** `shared-country` is a country folder someone shared with you; its memos live in a library. */
 type LibraryFolderType = 'country' | 'custom' | 'shared-country';
@@ -74,9 +117,6 @@ const UNKNOWN_LOCATION = UNKNOWN_COUNTRY_FOLDER;
 const LIBRARY_SEGMENTED_CONTROL_WIDTH = 184;
 const LIBRARY_SEGMENTED_CONTROL_PADDING = 3;
 const LIBRARY_SEGMENT_WIDTH = (LIBRARY_SEGMENTED_CONTROL_WIDTH - LIBRARY_SEGMENTED_CONTROL_PADDING * 2) / 2;
-const LIBRARY_TAB_INDICATOR_DURATION_MS = 380;
-const LIBRARY_PAGE_FADE_OUT_DURATION_MS = 180;
-const LIBRARY_PAGE_FADE_IN_DURATION_MS = 300;
 
 interface Props {
     visible: boolean;
@@ -97,7 +137,7 @@ interface Props {
         country: string,
         description?: string,
         title?: string,
-        options?: { customFolderIds?: string[] }
+        options?: { customFolderIds?: string[]; placeCategory?: MemoryPlaceCategory }
     ) => Promise<void>;
     toggleMemoryInCustomFolder: (memoryId: string, folderId: string) => Promise<void>;
     addMemoriesToCustomFolder: (
@@ -112,9 +152,9 @@ interface Props {
 }
 
 export default function LibraryModal({
-    visible,
+    visible: visibleProp,
     onClose,
-    enableSwipeToClose = false,
+    enableSwipeToClose: swipeProp = false,
     memories,
     sharedLibraryMemories,
     customFolders,
@@ -134,7 +174,15 @@ export default function LibraryModal({
 }: Props) {
     const { user } = useAuth();
     const { theme } = useAppTheme();
-    const dismissDragY = useSharedValue(0);
+    const {
+        visible: overlayVisible,
+        close: closeOverlay,
+        sheetTranslateY: dismissDragY,
+        sheetTravel,
+    } = useLibrariesOverlay();
+    const visible = visibleProp || overlayVisible;
+    const enableSwipeToClose = Boolean(swipeProp) || (overlayVisible && !visibleProp);
+    const tabBarHeight = useBottomTabBarHeight();
     const styles = useMemo(() => createStyles(theme.colors), [theme.colors]);
     const [selectedFolder, setSelectedFolder] = useState<LibraryFolder | null>(null);
     const [previousSelectedFolder, setPreviousSelectedFolder] = useState<LibraryFolder | null>(null);
@@ -162,12 +210,19 @@ export default function LibraryModal({
         () => new Set(),
     );
     const { width: windowWidth, height: windowHeight } = useWindowDimensions();
+    const screenHeight = useSharedValue(windowHeight || 800);
+    const [sheetMounted, setSheetMounted] = useState(false);
+    const [usesSheet, setUsesSheet] = useState(false);
+    const [gridReady, setGridReady] = useState(false);
+    if (enableSwipeToClose && !usesSheet) {
+        setUsesSheet(true);
+    }
+    if ((enableSwipeToClose || usesSheet) && visible && !sheetMounted) {
+        setSheetMounted(true);
+    }
     const libraryActionsBarWidth = Math.max(200, windowWidth - 88);
     const folderViewAnimation = useRef(new Animated.Value(1)).current;
-    const libraryVariantAnimation = useRef(new Animated.Value(1)).current;
-    const librarySegmentAnimation = useRef(new Animated.Value(variant === 'countries' ? 0 : 1)).current;
-    const [libraryTransitionDirection, setLibraryTransitionDirection] = useState(1);
-    const pendingVariantFadeInRef = useRef(false);
+    const segment = useSharedValue(variant === 'countries' ? 0 : 1);
     const GOOGLE_API_KEY = process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY;
 
     const clearMemoSelectionMode = useCallback(() => {
@@ -199,11 +254,23 @@ export default function LibraryModal({
 
     const canDeleteMemory = useCallback((memory: Memory) => !memory.deletedAt && !memory.isShared, []);
 
+    const markGridReady = useCallback(() => {
+        setGridReady(true);
+    }, []);
+
     useEffect(() => {
-        if (!enableSwipeToClose || !visible) return;
-        dismissDragY.value = windowHeight;
-        dismissDragY.value = withTiming(0, { duration: 280 });
-    }, [enableSwipeToClose, visible, dismissDragY, windowHeight]);
+        const height = windowHeight || 800;
+        screenHeight.value = height;
+        sheetTravel.value = height;
+        if (!visible) dismissDragY.value = height;
+    }, [dismissDragY, screenHeight, sheetTravel, visible, windowHeight]);
+
+    useEffect(() => {
+        if (!usesSheet || !visible) return;
+        dismissDragY.value = withSpring(0, LIBRARY_SHEET_SPRING, (finished) => {
+            if (finished) runOnJS(markGridReady)();
+        });
+    }, [dismissDragY, markGridReady, usesSheet, visible]);
 
     useEffect(() => {
         if (!selectedFolder) return;
@@ -236,80 +303,22 @@ export default function LibraryModal({
         [folderViewAnimation]
     );
 
-    const libraryListAnimatedStyle = useMemo(
-        () => ({
-            opacity: libraryVariantAnimation,
-            transform: [
-                {
-                    translateX: libraryVariantAnimation.interpolate({
-                        inputRange: [0, 1],
-                        outputRange: [libraryTransitionDirection * 28, 0],
-                    }),
-                },
-            ],
-        }),
-        [libraryTransitionDirection, libraryVariantAnimation]
-    );
-
-    const librarySegmentIndicatorStyle = useMemo(
-        () => ({
-            transform: [
-                {
-                    translateX: librarySegmentAnimation.interpolate({
-                        inputRange: [0, 1],
-                        outputRange: [0, LIBRARY_SEGMENT_WIDTH],
-                    }),
-                },
-            ],
-        }),
-        [librarySegmentAnimation]
-    );
+    const librarySegmentIndicatorStyle = useAnimatedStyle(() => ({
+        transform: [{ translateX: segment.value * LIBRARY_SEGMENT_WIDTH }],
+    }));
+    const countriesPageStyle = useAnimatedStyle(() => ({
+        opacity: 1 - segment.value,
+    }));
+    const privatePageStyle = useAnimatedStyle(() => ({
+        opacity: segment.value,
+    }));
 
     useEffect(() => {
-        if (visible) {
-            setActiveVariant(variant);
-            setTargetVariant(variant);
-            libraryVariantAnimation.setValue(1);
-            librarySegmentAnimation.setValue(variant === 'countries' ? 0 : 1);
-            return;
-        }
-
-        if (!visible) {
-            setSelectedFolder(null);
-            setPreviousSelectedFolder(null);
-            setIsCreateFolderVisible(false);
-            setIsAddToFolderVisible(false);
-            setIsLibraryActionsVisible(false);
-            setNewFolderName('');
-            setIsShareLibraryVisible(false);
-            setLibraryShareRecipient('');
-            setIsGrantAccessVisible(false);
-            setGrantAccessRecipient('');
-            setAddMemosTab('saved');
-            setLibraryPlaceSearchQuery('');
-            setLibraryPlaceSearchResults([]);
-            setSelectedLibraryPlace(null);
-            setIsSearchingLibraryPlaces(false);
-            setIsAddingLibraryPlace(false);
-            clearMemoSelectionMode();
-            setActiveVariant(variant);
-            setTargetVariant(variant);
-        }
-    }, [librarySegmentAnimation, libraryVariantAnimation, variant, visible, clearMemoSelectionMode]);
-
-    // Start the fade-in only after React has committed the new variant's content to the view
-    // tree, preventing the old list from briefly appearing at non-zero opacity during the
-    // animation (race between native animation thread and JS render commit).
-    useEffect(() => {
-        if (!pendingVariantFadeInRef.current) return;
-        pendingVariantFadeInRef.current = false;
-        Animated.timing(libraryVariantAnimation, {
-            toValue: 1,
-            duration: LIBRARY_PAGE_FADE_IN_DURATION_MS,
-            easing: Easing.out(Easing.cubic),
-            useNativeDriver: true,
-        }).start();
-    }, [activeVariant, libraryVariantAnimation]);
+        if (!visible) return;
+        setActiveVariant(variant);
+        setTargetVariant(variant);
+        segment.value = variant === 'countries' ? 0 : 1;
+    }, [segment, variant, visible]);
 
     const visiblePersonalMemories = useMemo(
         () => memories.filter(memory => !memory.deletedAt),
@@ -421,10 +430,6 @@ export default function LibraryModal({
         },
         [customFolders, libraryMemoriesByCustomFolder]
     );
-
-    const libraryFolders = useMemo((): LibraryFolder[] => {
-        return activeVariant === 'countries' ? countryFolders : customLibraryFolders;
-    }, [activeVariant, countryFolders, customLibraryFolders]);
 
     const isOwnCountryFolder = selectedFolder?.type === 'country';
     const isSharedCountryFolder = selectedFolder?.type === 'shared-country';
@@ -542,7 +547,15 @@ export default function LibraryModal({
     const canShareSelectedFolder = selectedCustomFolder?.role === 'owner';
     const canGrantEditAccess = selectedCustomFolder?.role === 'owner';
 
+    const librarySearchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const librarySearchSeqRef = useRef(0);
+    useEffect(() => () => {
+        if (librarySearchTimerRef.current) clearTimeout(librarySearchTimerRef.current);
+    }, []);
+
     const clearLibraryPlaceSearch = useCallback(() => {
+        if (librarySearchTimerRef.current) clearTimeout(librarySearchTimerRef.current);
+        librarySearchSeqRef.current += 1;
         setLibraryPlaceSearchQuery('');
         setLibraryPlaceSearchResults([]);
         setSelectedLibraryPlace(null);
@@ -550,83 +563,61 @@ export default function LibraryModal({
 
     const handleVariantChange = useCallback((nextVariant: LibraryVariant) => {
         if (nextVariant === activeVariant) return;
-
-        Keyboard.dismiss();
+        const nextSegment = nextVariant === 'countries' ? 0 : 1;
+        segment.value = withTiming(nextSegment, { duration: 180 });
+        setActiveVariant(nextVariant);
         setTargetVariant(nextVariant);
-        setLibraryTransitionDirection(nextVariant === 'custom' ? 1 : -1);
+    }, [activeVariant, segment]);
 
-        Animated.parallel([
-            Animated.timing(librarySegmentAnimation, {
-                toValue: nextVariant === 'countries' ? 0 : 1,
-                duration: LIBRARY_TAB_INDICATOR_DURATION_MS,
-                easing: Easing.out(Easing.cubic),
-                useNativeDriver: true,
-            }),
-            Animated.timing(libraryVariantAnimation, {
-                toValue: 0,
-                duration: LIBRARY_PAGE_FADE_OUT_DURATION_MS,
-                easing: Easing.out(Easing.quad),
-                useNativeDriver: true,
-            }),
-        ]).start(() => {
-            libraryVariantAnimation.setValue(0);
-            setActiveVariant(nextVariant);
-            setSelectedFolder(null);
-            setPreviousSelectedFolder(null);
-            setIsCreateFolderVisible(false);
-            setIsAddToFolderVisible(false);
-            setIsLibraryActionsVisible(false);
-            setIsShareLibraryVisible(false);
-            setLibraryShareRecipient('');
-            setIsGrantAccessVisible(false);
-            setGrantAccessRecipient('');
-            setAddMemosTab('saved');
-            clearLibraryPlaceSearch();
-            clearMemoSelectionMode();
-            // Signal the effect to start the fade-in only after React commits the new content.
-            pendingVariantFadeInRef.current = true;
-        });
-    }, [
-        activeVariant,
-        clearLibraryPlaceSearch,
-        clearMemoSelectionMode,
-        librarySegmentAnimation,
-        libraryVariantAnimation,
-    ]);
-
-    const fetchLibraryPlaces = useCallback(async (text: string) => {
+    const fetchLibraryPlaces = useCallback((text: string) => {
         setLibraryPlaceSearchQuery(text);
         setSelectedLibraryPlace(null);
-
-        if (text.length < 3) {
+        if (librarySearchTimerRef.current) clearTimeout(librarySearchTimerRef.current);
+        if (text.trim().length < 3) {
+            librarySearchSeqRef.current += 1;
             setLibraryPlaceSearchResults([]);
+            setIsSearchingLibraryPlaces(false);
             return;
         }
 
+        const seq = ++librarySearchSeqRef.current;
+        setIsSearchingLibraryPlaces(true);
+        librarySearchTimerRef.current = setTimeout(() => {
+            void (async () => {
+                try {
+                    const predictions = await getPlacesClient().search(text);
+                    if (seq !== librarySearchSeqRef.current) return;
+                    setLibraryPlaceSearchResults(predictions);
+                } catch (error) {
+                    console.error('Library place search failed:', error);
+                    if (seq === librarySearchSeqRef.current) {
+                        Alert.alert('Search failed', 'Could not search places right now.');
+                    }
+                } finally {
+                    if (seq === librarySearchSeqRef.current) setIsSearchingLibraryPlaces(false);
+                }
+            })();
+        }, PLACE_SEARCH_DEBOUNCE_MS);
+    }, []);
+
+    const handleSelectLibraryPlace = useCallback(async (prediction: PlacePrediction) => {
         setIsSearchingLibraryPlaces(true);
         try {
-            const predictions = await fetchGooglePlacePredictions(text, GOOGLE_API_KEY);
-            setLibraryPlaceSearchResults(predictions);
-        } catch (error) {
-            console.error('Library place search failed:', error);
-            Alert.alert('Search failed', 'Could not search places right now.');
-        } finally {
-            setIsSearchingLibraryPlaces(false);
-        }
-    }, [GOOGLE_API_KEY]);
-
-    const handleSelectLibraryPlace = useCallback(async (placeId: string, description: string) => {
-        setIsSearchingLibraryPlaces(true);
-        try {
-            const place = await fetchGooglePlaceDetails(placeId, description, GOOGLE_API_KEY);
-
+            const hint = hintForPrediction(prediction);
+            const client = getPlacesClient();
+            const place = await client.details(prediction.place_id, hint);
             if (!place) {
                 Alert.alert('Place not found', 'Could not load this place.');
                 return;
             }
-
-            setSelectedLibraryPlace(place);
-            setLibraryPlaceSearchQuery(description);
+            const photos = await client.photos(prediction.place_id, hint);
+            setSelectedLibraryPlace({
+                ...place,
+                title: place.title || prediction.description,
+                photoReference: photos[0] ?? null,
+                category: place.category ?? prediction.category,
+            });
+            setLibraryPlaceSearchQuery(prediction.description);
             setLibraryPlaceSearchResults([]);
             Keyboard.dismiss();
         } catch (error) {
@@ -635,14 +626,12 @@ export default function LibraryModal({
         } finally {
             setIsSearchingLibraryPlaces(false);
         }
-    }, [GOOGLE_API_KEY]);
+    }, []);
 
     const handleAddSelectedPlaceToLibrary = useCallback(async () => {
         if (!selectedFolder || selectedFolder.type !== 'custom' || !selectedLibraryPlace) return;
 
-        const photoUri = selectedLibraryPlace.photoReference
-            ? `https://maps.googleapis.com/maps/api/place/photo?maxwidth=1200&photo_reference=${selectedLibraryPlace.photoReference}&key=${GOOGLE_API_KEY}`
-            : PLACEHOLDER_URL;
+        const photoUri = placePhotoUri(selectedLibraryPlace.photoReference, GOOGLE_API_KEY) ?? PLACEHOLDER_URL;
 
         setIsAddingLibraryPlace(true);
         try {
@@ -653,7 +642,10 @@ export default function LibraryModal({
                 selectedLibraryPlace.country ?? '',
                 undefined,
                 selectedLibraryPlace.title,
-                { customFolderIds: [selectedFolder.id] }
+                {
+                    customFolderIds: [selectedFolder.id],
+                    placeCategory: selectedLibraryPlace.category,
+                }
             );
             Alert.alert('Place added', `${selectedLibraryPlace.title.split(',')[0].trim()} was added to ${selectedFolder.name}.`);
             clearLibraryPlaceSearch();
@@ -674,20 +666,22 @@ export default function LibraryModal({
 
     const finishClose = useCallback(() => {
         Keyboard.dismiss();
+        setSelectedFolder(null);
+        setPreviousSelectedFolder(null);
+        clearMemoSelectionMode();
         onClose();
-    }, [onClose]);
+        closeOverlay();
+    }, [clearMemoSelectionMode, closeOverlay, onClose]);
 
     const handleClose = useCallback(() => {
-        if (!enableSwipeToClose) {
+        if (!(enableSwipeToClose || usesSheet)) {
             finishClose();
             return;
         }
-        dismissDragY.value = withTiming(windowHeight, { duration: 220 }, (finished) => {
-            if (finished) {
-                runOnJS(finishClose)();
-            }
+        dismissDragY.value = withSpring(screenHeight.value, LIBRARY_SHEET_SPRING, (finished) => {
+            if (finished) runOnJS(finishClose)();
         });
-    }, [dismissDragY, enableSwipeToClose, finishClose, windowHeight]);
+    }, [dismissDragY, enableSwipeToClose, finishClose, screenHeight, usesSheet]);
 
     const dismissPanGesture = useMemo(() => (
         Gesture.Pan()
@@ -701,16 +695,14 @@ export default function LibraryModal({
             })
             .onEnd((event) => {
                 if (event.translationY > LIBRARY_DISMISS_DRAG_THRESHOLD || event.velocityY > LIBRARY_DISMISS_VELOCITY) {
-                    dismissDragY.value = withTiming(windowHeight, { duration: 220 }, (finished) => {
-                        if (finished) {
-                            runOnJS(finishClose)();
-                        }
+                    dismissDragY.value = withSpring(screenHeight.value, LIBRARY_SHEET_SPRING, (finished) => {
+                        if (finished) runOnJS(finishClose)();
                     });
                     return;
                 }
-                dismissDragY.value = withTiming(0, { duration: 180 });
+                dismissDragY.value = withSpring(0, LIBRARY_SHEET_SPRING);
             })
-    ), [dismissDragY, enableSwipeToClose, finishClose, windowHeight]);
+    ), [dismissDragY, enableSwipeToClose, finishClose, screenHeight]);
 
     useEffect(() => {
         if (!enableSwipeToClose || !visible) return;
@@ -723,6 +715,15 @@ export default function LibraryModal({
 
     const dismissAnimatedStyle = useAnimatedStyle(() => ({
         transform: [{ translateY: dismissDragY.value }],
+    }));
+
+    const backdropAnimatedStyle = useAnimatedStyle(() => ({
+        opacity: interpolate(
+            dismissDragY.value,
+            [0, screenHeight.value || 1],
+            [0.4, 0],
+            Extrapolation.CLAMP,
+        ),
     }));
 
     const handleCreateFolder = async () => {
@@ -891,6 +892,137 @@ export default function LibraryModal({
         cancelButton: styles.secondaryButton,
         cancelButtonText: styles.secondaryButtonText,
     }), [styles]);
+
+    const FOLDER_ROW_HEIGHT = 182;
+    const getFolderItemLayout = useCallback((_: ArrayLike<LibraryFolder> | null | undefined, index: number) => ({
+        length: FOLDER_ROW_HEIGHT,
+        offset: FOLDER_ROW_HEIGHT * Math.floor(index / 2),
+        index,
+    }), []);
+    const folderListContentStyle = useMemo(
+        () => ({ padding: 14, paddingBottom: tabBarHeight + 16 }),
+        [tabBarHeight],
+    );
+    const countryCardStyles = useMemo(() => ({
+        countryFolderBackground: styles.countryFolderBackground,
+        countryFolderOverlay: styles.countryFolderOverlay,
+        countryFolderContent: styles.countryFolderContent,
+        countryFolderTitle: styles.countryFolderTitle,
+        countryFolderCount: styles.countryFolderCount,
+    }), [styles]);
+    const openFolder = useCallback((item: LibraryFolder) => {
+        setIsAddToFolderVisible(false);
+        setIsLibraryActionsVisible(false);
+        setIsShareLibraryVisible(false);
+        setLibraryShareRecipient('');
+        setIsGrantAccessVisible(false);
+        setGrantAccessRecipient('');
+        clearMemoSelectionMode();
+        startTransition(() => {
+            setSelectedFolder(item);
+        });
+    }, [clearMemoSelectionMode]);
+    const renderFolderCard = useCallback(({ item }: { item: LibraryFolder }) => (
+        <TouchableOpacity onPress={() => openFolder(item)} style={styles.folderCard}>
+            {item.type === 'country' || item.type === 'shared-country' ? (
+                <CountryFolderBackground
+                    countryName={item.name}
+                    memoCount={item.memoCount}
+                    footerLabel={item.type === 'shared-country' ? 'Shared with you' : undefined}
+                    styles={countryCardStyles}
+                />
+            ) : item.coverImageUrl ? (
+                <View style={styles.customFolderBackground}>
+                    <ExpoImage
+                        source={{ uri: item.coverImageUrl }}
+                        style={StyleSheet.absoluteFillObject}
+                        contentFit="cover"
+                        cachePolicy="memory-disk"
+                        allowDownscaling
+                    />
+                    <View style={styles.customFolderOverlay} />
+                    <View style={styles.customFolderCoverContent}>
+                        <Text style={styles.customFolderCoverTitle} numberOfLines={2}>{item.name}</Text>
+                        <Text style={styles.customFolderCoverCount}>
+                            {item.memoCount} memo{item.memoCount === 1 ? '' : 's'}
+                        </Text>
+                        <View style={styles.sharedLibraryCoverLabelRow}>
+                            {item.isShared ? <View style={styles.sharedLibraryCoverDot} /> : null}
+                            <Text style={styles.customFolderCoverLabel}>
+                                {item.isShared ? 'Shared library' : 'Custom folder'}
+                            </Text>
+                        </View>
+                    </View>
+                </View>
+            ) : (
+                <View style={styles.customFolderContent}>
+                    <View style={styles.customFolderIcon}>
+                        <Ionicons name="folder-open" size={24} color={theme.colors.accentText} />
+                    </View>
+                    <Text style={styles.customFolderTitle} numberOfLines={2}>{item.name}</Text>
+                    <Text style={styles.customFolderCount}>
+                        {item.memoCount} memo{item.memoCount === 1 ? '' : 's'}
+                    </Text>
+                    <View style={styles.sharedLibraryLabelRow}>
+                        {item.isShared ? <View style={styles.sharedLibraryDot} /> : null}
+                        <Text style={styles.customFolderLabel}>
+                            {item.isShared ? 'Shared library' : 'Custom folder'}
+                        </Text>
+                    </View>
+                </View>
+            )}
+        </TouchableOpacity>
+    ), [countryCardStyles, openFolder, styles, theme.colors.accentText]);
+    const countriesEmpty = useMemo(() => (
+        <View style={styles.emptyCard}>
+            <Ionicons name="images-outline" size={36} color={theme.colors.textMuted} />
+            <Text style={styles.emptyInlineTitle}>No country folders yet</Text>
+            <Text style={styles.emptyInlineText}>
+                Save memos from different countries and they will appear here automatically.
+            </Text>
+        </View>
+    ), [styles, theme.colors.textMuted]);
+    const privateEmpty = useMemo(() => (
+        <View style={styles.emptyCard}>
+            <Ionicons name="folder-open-outline" size={36} color={theme.colors.textMuted} />
+            <Text style={styles.emptyInlineTitle}>No custom libraries yet</Text>
+            <Text style={styles.emptyInlineText}>Tap Create Folder above to add your first library.</Text>
+        </View>
+    ), [styles, theme.colors.textMuted]);
+    const privateListHeader = isCreateFolderVisible ? (
+        <View style={styles.infoCard}>
+            <View style={styles.createFolderForm}>
+                <Text style={styles.panelInlineTitle}>New Custom Folder</Text>
+                <Text style={styles.panelInlineText}>
+                    Create folders like Food, Museums, or Friends and then add memos to them.
+                </Text>
+                <TextInput
+                    style={styles.folderNameInput}
+                    placeholder="Folder name"
+                    placeholderTextColor={theme.colors.placeholder}
+                    value={newFolderName}
+                    onChangeText={setNewFolderName}
+                    returnKeyType="done"
+                    onSubmitEditing={handleCreateFolder}
+                />
+                <View style={styles.createFolderActions}>
+                    <TouchableOpacity onPress={handleCreateFolder} style={styles.primaryButton}>
+                        <Text style={styles.primaryButtonText}>Save Folder</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                        onPress={() => {
+                            Keyboard.dismiss();
+                            setIsCreateFolderVisible(false);
+                            setNewFolderName('');
+                        }}
+                        style={styles.secondaryButton}
+                    >
+                        <Text style={styles.secondaryButtonText}>Cancel</Text>
+                    </TouchableOpacity>
+                </View>
+            </View>
+        </View>
+    ) : null;
 
     const libraryContent = (
             <SafeAreaView style={{ flex: 1, backgroundColor: theme.colors.backgroundSoft }}>
@@ -1279,7 +1411,7 @@ export default function LibraryModal({
 
                         {!selectedFolder ? (
                             <View style={styles.librarySegmentedControl}>
-                                <Animated.View
+                                <Reanimated.View
                                     pointerEvents="none"
                                     style={[
                                         styles.librarySegmentIndicator,
@@ -1356,152 +1488,47 @@ export default function LibraryModal({
 
                 {/* Body */}
                 {!selectedFolder ? (
-                    <Animated.View style={[styles.libraryListContainer, libraryListAnimatedStyle]}>
+                    <View style={styles.libraryListContainer}>
+                        <Reanimated.View
+                            pointerEvents={activeVariant === 'countries' ? 'auto' : 'none'}
+                            style={[styles.libraryPage, countriesPageStyle]}
+                        >
                         <FlatList
-                            data={libraryFolders}
+                            data={countryFolders}
                             numColumns={2}
-                            key={`folder-grid-${activeVariant}`}
+                            key="country-folder-grid"
                             keyExtractor={(item) => item.id}
-                            contentContainerStyle={{ padding: 14, paddingBottom: 32 }}
-                            ListHeaderComponent={
-                                activeVariant === 'custom' && isCreateFolderVisible ? (
-                                    <View style={styles.infoCard}>
-                                        <View style={styles.createFolderForm}>
-                                            <Text style={[styles.panelInlineTitle]}>
-                                                New Custom Folder
-                                            </Text>
-                                            <Text style={styles.panelInlineText}>
-                                                Create folders like Food, Museums, or Friends and then add memos to them.
-                                            </Text>
-                                            <TextInput
-                                                style={styles.folderNameInput}
-                                                placeholder="Folder name"
-                                                placeholderTextColor={theme.colors.placeholder}
-                                                value={newFolderName}
-                                                onChangeText={setNewFolderName}
-                                                returnKeyType="done"
-                                                onSubmitEditing={handleCreateFolder}
-                                            />
-                                            <View style={{ flexDirection: 'row', gap: 10, marginTop: 14 }}>
-                                                <TouchableOpacity onPress={handleCreateFolder} style={styles.primaryButton}>
-                                                    <Text style={{ color: 'white', fontWeight: '700' }}>Save Folder</Text>
-                                                </TouchableOpacity>
-                                                <TouchableOpacity
-                                                    onPress={() => {
-                                                        Keyboard.dismiss();
-                                                        setIsCreateFolderVisible(false);
-                                                        setNewFolderName('');
-                                                    }}
-                                                    style={styles.secondaryButton}
-                                                >
-                                                    <Text style={styles.secondaryButtonText}>Cancel</Text>
-                                                </TouchableOpacity>
-                                            </View>
-                                        </View>
-                                    </View>
-                                ) : null
-                            }
-                            ListEmptyComponent={
-                                activeVariant === 'countries' ? (
-                                    <View style={styles.emptyCard}>
-                                        <Ionicons name="images-outline" size={36} color={theme.colors.textMuted} />
-                                        <Text style={styles.emptyInlineTitle}>
-                                            No country folders yet
-                                        </Text>
-                                        <Text style={styles.emptyInlineText}>
-                                            Save memos from different countries and they will appear here automatically.
-                                        </Text>
-                                    </View>
-                                ) : (
-                                    <View style={styles.emptyCard}>
-                                        <Ionicons name="folder-open-outline" size={36} color={theme.colors.textMuted} />
-                                        <Text style={styles.emptyInlineTitle}>
-                                            No custom libraries yet
-                                        </Text>
-                                        <Text style={styles.emptyInlineText}>
-                                            Tap Create Folder above to add your first library.
-                                        </Text>
-                                    </View>
-                                )
-                            }
-                            renderItem={({ item }) => (
-                                <TouchableOpacity
-                                    onPress={() => {
-                                        setIsAddToFolderVisible(false);
-                                        setIsLibraryActionsVisible(false);
-                                        setIsShareLibraryVisible(false);
-                                        setLibraryShareRecipient('');
-                                        setIsGrantAccessVisible(false);
-                                        setGrantAccessRecipient('');
-                                        clearMemoSelectionMode();
-                                        startTransition(() => {
-                                            setSelectedFolder(item);
-                                        });
-                                    }}
-                                    style={styles.folderCard}
-                                >
-                                    {item.type === 'country' || item.type === 'shared-country' ? (
-                                        <CountryFolderBackground
-                                            countryName={item.name}
-                                            memoCount={item.memoCount}
-                                            footerLabel={item.type === 'shared-country' ? 'Shared with you' : undefined}
-                                            styles={{
-                                                countryFolderBackground: styles.countryFolderBackground,
-                                                countryFolderOverlay: styles.countryFolderOverlay,
-                                                countryFolderContent: styles.countryFolderContent,
-                                                countryFolderTitle: styles.countryFolderTitle,
-                                                countryFolderCount: styles.countryFolderCount,
-                                            }}
-                                        />
-                                    ) : (
-                                        item.coverImageUrl ? (
-                                            <View style={styles.customFolderBackground}>
-                                                <ExpoImage
-                                                    source={{ uri: item.coverImageUrl }}
-                                                    style={StyleSheet.absoluteFillObject}
-                                                    contentFit="cover"
-                                                    cachePolicy="memory-disk"
-                                                />
-                                                <View style={styles.customFolderOverlay} />
-                                                <View style={styles.customFolderCoverContent}>
-                                                    <Text style={styles.customFolderCoverTitle} numberOfLines={2}>
-                                                        {item.name}
-                                                    </Text>
-                                                    <Text style={styles.customFolderCoverCount}>
-                                                        {item.memoCount} memo{item.memoCount === 1 ? '' : 's'}
-                                                    </Text>
-                                                    <View style={styles.sharedLibraryCoverLabelRow}>
-                                                        {item.isShared ? <View style={styles.sharedLibraryCoverDot} /> : null}
-                                                        <Text style={styles.customFolderCoverLabel}>
-                                                            {item.isShared ? 'Shared library' : 'Custom folder'}
-                                                        </Text>
-                                                    </View>
-                                                </View>
-                                            </View>
-                                        ) : (
-                                            <View style={styles.customFolderContent}>
-                                                <View style={styles.customFolderIcon}>
-                                                    <Ionicons name="folder-open" size={24} color={theme.colors.accentText} />
-                                                </View>
-                                                <Text style={styles.customFolderTitle} numberOfLines={2}>
-                                                    {item.name}
-                                                </Text>
-                                                <Text style={styles.customFolderCount}>
-                                                    {item.memoCount} memo{item.memoCount === 1 ? '' : 's'}
-                                                </Text>
-                                                <View style={styles.sharedLibraryLabelRow}>
-                                                    {item.isShared ? <View style={styles.sharedLibraryDot} /> : null}
-                                                    <Text style={styles.customFolderLabel}>
-                                                        {item.isShared ? 'Shared library' : 'Custom folder'}
-                                                    </Text>
-                                                </View>
-                                            </View>
-                                        )
-                                    )}
-                                </TouchableOpacity>
-                            )}
+                            initialNumToRender={6}
+                            maxToRenderPerBatch={8}
+                            windowSize={5}
+                            removeClippedSubviews={false}
+                            getItemLayout={getFolderItemLayout}
+                            contentContainerStyle={folderListContentStyle}
+                            ListEmptyComponent={countriesEmpty}
+                            renderItem={renderFolderCard}
                         />
-                    </Animated.View>
+                        </Reanimated.View>
+                        <Reanimated.View
+                            pointerEvents={activeVariant === 'custom' ? 'auto' : 'none'}
+                            style={[styles.libraryPage, privatePageStyle]}
+                        >
+                        <FlatList
+                            data={customLibraryFolders}
+                            numColumns={2}
+                            key="private-folder-grid"
+                            keyExtractor={(item) => item.id}
+                            initialNumToRender={6}
+                            maxToRenderPerBatch={8}
+                            windowSize={5}
+                            removeClippedSubviews={false}
+                            getItemLayout={getFolderItemLayout}
+                            contentContainerStyle={folderListContentStyle}
+                            ListHeaderComponent={privateListHeader}
+                            ListEmptyComponent={privateEmpty}
+                            renderItem={renderFolderCard}
+                        />
+                        </Reanimated.View>
+                    </View>
                 ) : (
                     <Animated.View style={[styles.selectedFolderView, folderViewAnimatedStyle]}>
                         {isOwnCountryFolder && isShareLibraryVisible ? (
@@ -1698,7 +1725,7 @@ export default function LibraryModal({
                                                         {libraryPlaceSearchResults.map((place) => (
                                                             <TouchableOpacity
                                                                 key={place.place_id}
-                                                                onPress={() => handleSelectLibraryPlace(place.place_id, place.description)}
+                                                                onPress={() => handleSelectLibraryPlace(place)}
                                                                 style={styles.libraryPlaceResultItem}
                                                             >
                                                                 <Text style={styles.libraryPlaceResultTitle}>
@@ -1809,7 +1836,7 @@ export default function LibraryModal({
                             initialNumToRender={8}
                             maxToRenderPerBatch={8}
                             windowSize={5}
-                            contentContainerStyle={{ paddingHorizontal: 10, paddingBottom: 24, paddingTop: 0 }}
+                            contentContainerStyle={{ paddingHorizontal: 10, paddingBottom: tabBarHeight + 16, paddingTop: 0 }}
                             ListEmptyComponent={
                                 supportsCategoryFilter && hasActiveCategoryFilters ? (
                                     <View style={styles.emptyFolderCard}>
@@ -1868,10 +1895,13 @@ export default function LibraryModal({
                                             ]}>
                                                 <View style={styles.memoGridImageFrame}>
                                                     <ExpoImage
-                                                        source={{ uri: item.uri }}
-                                                        style={{ width: '100%', aspectRatio: 1 }}
+                                                        source={{ uri: pinImageUri(item) || item.uri }}
+                                                        style={styles.memoGridPhoto}
                                                         contentFit="cover"
                                                         cachePolicy="memory-disk"
+                                                        allowDownscaling
+                                                        recyclingKey={item.thumb_uri || item.id}
+                                                        placeholder={PLACEHOLDER_URL}
                                                     />
                                                     {isMemoSelectionMode && isDeletable ? (
                                                         <View style={[
@@ -1890,7 +1920,7 @@ export default function LibraryModal({
                                                             <View style={styles.memoCategoryBadge}>
                                                                 <PlaceCategoryIcon
                                                                     category={item.placeCategory}
-                                                                    size={10}
+                                                                    size={14}
                                                                     color="#374151"
                                                                 />
                                                             </View>
@@ -1913,20 +1943,25 @@ export default function LibraryModal({
             </SafeAreaView>
     );
 
-    return enableSwipeToClose ? (
-        visible ? (
-            <View style={styles.sheetOverlay} pointerEvents="box-none">
+    if (enableSwipeToClose || usesSheet) {
+        if (!sheetMounted) return null;
+        return (
+            <View style={styles.sheetOverlay} pointerEvents={visible ? 'box-none' : 'none'}>
                 <Reanimated.View
-                    style={[
-                        styles.sheetOverlayPanel,
-                        dismissAnimatedStyle,
-                    ]}
+                    pointerEvents={visible ? 'auto' : 'none'}
+                    style={[styles.sheetBackdrop, backdropAnimatedStyle]}
+                />
+                <Reanimated.View
+                    pointerEvents={visible ? 'auto' : 'none'}
+                    style={[styles.sheetOverlayPanel, dismissAnimatedStyle]}
                 >
-                    {libraryContent}
+                    {gridReady ? libraryContent : <LibrarySheetSkeleton />}
                 </Reanimated.View>
             </View>
-        ) : null
-    ) : (
+        );
+    }
+
+    return (
         <Modal
             animationType="slide"
             transparent={false}
@@ -1963,6 +1998,19 @@ const createStyles = (colors: ThemeColors) => StyleSheet.create({
     },
     libraryListContainer: {
         flex: 1,
+        overflow: 'hidden',
+    },
+    libraryPage: {
+        ...StyleSheet.absoluteFillObject,
+    },
+    createFolderActions: {
+        flexDirection: 'row',
+        gap: 10,
+        marginTop: 14,
+    },
+    primaryButtonText: {
+        color: 'white',
+        fontWeight: '700',
     },
     swipeHandleRow: {
         alignItems: 'center',
@@ -1977,6 +2025,10 @@ const createStyles = (colors: ThemeColors) => StyleSheet.create({
     sheetOverlay: {
         ...StyleSheet.absoluteFillObject,
         zIndex: 200,
+    },
+    sheetBackdrop: {
+        ...StyleSheet.absoluteFillObject,
+        backgroundColor: '#0F172A',
     },
     sheetOverlayPanel: {
         flex: 1,
@@ -2576,6 +2628,10 @@ const createStyles = (colors: ThemeColors) => StyleSheet.create({
         borderWidth: 0.5,
         borderColor: 'rgba(0, 0, 0, 0.08)',
     },
+    memoGridPhoto: {
+        width: '100%',
+        aspectRatio: 1,
+    },
     memoGridImageFrame: {
         overflow: 'hidden',
         borderRadius: 4,
@@ -2610,9 +2666,9 @@ const createStyles = (colors: ThemeColors) => StyleSheet.create({
         gap: 4,
     },
     memoCategoryBadge: {
-        width: 16,
-        height: 16,
-        borderRadius: 8,
+        width: 22,
+        height: 22,
+        borderRadius: 11,
         backgroundColor: 'rgba(15, 23, 42, 0.08)',
         alignItems: 'center',
         justifyContent: 'center',

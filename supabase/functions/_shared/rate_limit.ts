@@ -2,9 +2,11 @@ import { jsonResponse } from './http.ts';
 
 export const PLAN_AGENT_ENDPOINT = 'plan-agent';
 export const IMPORT_VIDEO_ENDPOINT = 'import-video-job';
+export const PLACES_PROXY_ENDPOINT = 'places-proxy';
 
 export const DEFAULT_PLAN_AGENT_DAILY_LIMIT = 40;
 export const DEFAULT_IMPORT_VIDEO_DAILY_LIMIT = 20;
+export const DEFAULT_PLACES_PROXY_DAILY_LIMIT = 400;
 
 const MAX_CONFIGURED_LIMIT = 100_000;
 

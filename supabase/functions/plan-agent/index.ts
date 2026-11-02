@@ -10,7 +10,7 @@ SCOPE: You only assist with travel, trip planning, and place recommendations (re
 
 LANGUAGE: Detect the user's language from the latest user message and prior turns when provided. All user-facing text must be in that language. Google Maps search strings (maps_query_english, searchQuery, structured English query fields) stay in English.
 
-TRUTH: Never invent place names, addresses, ratings, or opening hours. Only describe venues that appear in supplied Google results or structured data you were given.
+TRUTH: Never invent place names, addresses, ratings, or opening hours. Only describe venues that appear in supplied place results or structured data you were given.
 
 QUERIES: Use specific English place queries including city and neighborhood or landmark when known. Never output bare activity words as a final query (e.g. not just "breakfast").
 
@@ -22,6 +22,8 @@ SAFETY: No medical or legal advice. Do not guarantee opening hours; suggest veri
 
 const JSON_ONLY = 'Return a single JSON object only. No markdown.';
 
+import { mapGooglePlaceCategory } from '../../../lib/places/placeCategorySignals.ts';
+import { isGooglePlaceId } from '../../../lib/places/placeId.ts';
 import type { RecommendedPlace } from './plan_agent_types.ts';
 import { readNearMeGeoEnv } from './geo.ts';
 import { createUserSupabase, fetchMemorySnippetBlockForPlaces } from './memory_rag.ts';
@@ -257,17 +259,49 @@ async function getCityName(lat: number, lng: number): Promise<string> {
     }
 }
 
-async function getPlaceDetails(placeId: string): Promise<{
+interface LoadedPlaceDetails {
     lat: number;
     lng: number;
     photoReference: string | null;
     openingHours: string | null;
     country: string;
     formattedAddress: string;
-}> {
+    placeCategory?: string;
+}
+
+function directionPoint(placeId: string, lat: number, lng: number): string {
+    if (isGooglePlaceId(placeId)) return `place_id:${placeId}`;
+    return `${lat},${lng}`;
+}
+
+async function detailsForKnownPlace(place: {
+    placeId: string;
+    lat?: number;
+    lng?: number;
+    address?: string;
+    photoReference?: string | null;
+    openingHours?: string | null;
+    country?: string;
+    placeCategory?: string;
+}): Promise<LoadedPlaceDetails> {
+    if (!isGooglePlaceId(place.placeId) && typeof place.lat === 'number' && typeof place.lng === 'number') {
+        return {
+            lat: place.lat,
+            lng: place.lng,
+            photoReference: place.photoReference ?? null,
+            openingHours: place.openingHours ?? null,
+            country: place.country ?? '',
+            formattedAddress: place.address ?? '',
+            placeCategory: place.placeCategory,
+        };
+    }
+    return getPlaceDetails(place.placeId);
+}
+
+async function getPlaceDetails(placeId: string): Promise<LoadedPlaceDetails> {
     const params = new URLSearchParams({
         place_id: placeId,
-        fields: 'geometry,photos,address_components,opening_hours,formatted_address',
+        fields: 'geometry,photos,address_components,opening_hours,formatted_address,types,name',
         key: GOOGLE_API_KEY,
     });
     const res = await fetch(
@@ -293,8 +327,26 @@ async function getPlaceDetails(placeId: string): Promise<{
     const countryComp = components.find((c) => c.types.includes('country'));
     const country = countryComp?.long_name ?? '';
     const formattedAddress = (result.formatted_address as string) ?? '';
+    const types = Array.isArray(result.types) ? result.types as string[] : [];
+    const primaryType = typeof result.primaryType === 'string'
+        ? result.primaryType
+        : typeof result.primary_type === 'string'
+            ? result.primary_type
+            : undefined;
 
-    return { lat, lng, photoReference, openingHours, country, formattedAddress };
+    return {
+        lat,
+        lng,
+        photoReference,
+        openingHours,
+        country,
+        formattedAddress,
+        placeCategory: mapGooglePlaceCategory({
+            name: typeof result.name === 'string' ? result.name : undefined,
+            types,
+            primaryType,
+        }),
+    };
 }
 
 async function enrichPlacesWithGemini(
@@ -351,16 +403,16 @@ async function finalizeItinerary(
     const lastStop = resolved[resolved.length - 1];
     const dirParams: Record<string, string> = {
         origin: `${originLat},${originLng}`,
-        destination: `place_id:${lastStop.placeId}`,
+        destination: directionPoint(lastStop.placeId, lastStop.lat, lastStop.lng),
         mode: 'driving',
         key: GOOGLE_API_KEY,
     };
 
     if (resolved.length === 2) {
-        dirParams.waypoints = `place_id:${resolved[0].placeId}`;
+        dirParams.waypoints = directionPoint(resolved[0].placeId, resolved[0].lat, resolved[0].lng);
     } else if (resolved.length >= 3) {
         const intermediates = resolved.slice(0, -1);
-        dirParams.waypoints = `optimize:true|${intermediates.map((s) => `place_id:${s.placeId}`).join('|')}`;
+        dirParams.waypoints = `optimize:true|${intermediates.map((s) => directionPoint(s.placeId, s.lat, s.lng)).join('|')}`;
     }
 
     const dirRes = await fetch(
@@ -667,7 +719,7 @@ Return JSON:
                     sections.push({ title: seg.user_language_label, intro, places: withDesc });
                     const pick = withDesc[0];
                     if (pick) {
-                        const details = await getPlaceDetails(pick.placeId);
+                        const details = await detailsForKnownPlace(pick);
                         resolvedRoute.push({
                             name: pick.name,
                             category: seg.category,
@@ -687,7 +739,7 @@ Return JSON:
                         tripCoords.lng,
                     );
                     if (found) {
-                        const details = await getPlaceDetails(found.placeId);
+                        const details = await detailsForKnownPlace(found);
                         const single: RecommendedPlace = {
                             name: found.name,
                             address: details.formattedAddress,
@@ -699,6 +751,8 @@ Return JSON:
                             lng: details.lng,
                             country: details.country,
                             description: '',
+                            openingHours: details.openingHours,
+                            placeCategory: found.placeCategory ?? details.placeCategory,
                         };
                         const label = seg.user_language_label ?? found.name;
                         const ownedSnippet = userSb
@@ -822,7 +876,7 @@ Rules:
         for (const stop of parsed.stops) {
             const found = await searchPlace(stop.query, searchLat, searchLng);
             if (!found) continue;
-            const details = await getPlaceDetails(found.placeId);
+            const details = await detailsForKnownPlace(found);
             resolved.push({
                 name: found.name,
                 category: stop.category,

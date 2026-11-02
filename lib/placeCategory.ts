@@ -23,6 +23,14 @@ export function normalizePlaceCategory(raw: unknown): MemoryPlaceCategory | unde
     return value as MemoryPlaceCategory;
 }
 
+/** A category already stored on the memory wins over a newly inferred one. */
+export function resolvePlaceCategoryForSave(
+    existing: unknown,
+    incoming: unknown,
+): MemoryPlaceCategory | undefined {
+    return normalizePlaceCategory(existing) ?? normalizePlaceCategory(incoming);
+}
+
 export function placeCategoryIcon(
     category: MemoryPlaceCategory,
 ): keyof typeof Ionicons.glyphMap {

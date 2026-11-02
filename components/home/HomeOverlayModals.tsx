@@ -1,6 +1,5 @@
 import InvitesModal from '@/components/InvitesModal';
 import MarketPlaceModal from '@/components/MarketPlaceModal';
-import MemoActionsSheet from '@/components/MemoActionsSheet';
 import MemoInfoModal from '@/components/MemoInfoModal';
 import PlaceDescriptionModal from '@/components/PlaceDescriptionModal';
 import SettingsSheet, { type SettingsSheetRef } from '@/components/SettingsSheet';
@@ -14,14 +13,11 @@ import React from 'react';
 type HomeOverlayModalsProps = {
     userId?: string;
     isSignedIn: boolean;
-    actionSheetMemory: Memory | null;
-    selectedMemoryForActions: Memory | null;
-    onCloseActions: () => void;
-    onOpenInfoFromActions: () => void;
-    onStartWalkingRoute: () => void;
-    onOpenDrivingRoute: () => void;
-    onShareFromActions: () => void;
-    onDeleteFromActions: () => void;
+    onWalkFromInfo: () => void;
+    onDriveFromInfo: () => void;
+    onShareFromInfo: () => void;
+    onDeleteFromInfo: () => void;
+    onInfoDismissed: () => void;
     isInfoModalVisible: boolean;
     selectedMemoryForInfo: Memory | null;
     onCloseInfo: () => void;
@@ -59,14 +55,11 @@ type HomeOverlayModalsProps = {
 export default function HomeOverlayModals({
     userId,
     isSignedIn,
-    actionSheetMemory,
-    selectedMemoryForActions,
-    onCloseActions,
-    onOpenInfoFromActions,
-    onStartWalkingRoute,
-    onOpenDrivingRoute,
-    onShareFromActions,
-    onDeleteFromActions,
+    onWalkFromInfo,
+    onDriveFromInfo,
+    onShareFromInfo,
+    onDeleteFromInfo,
+    onInfoDismissed,
     isInfoModalVisible,
     selectedMemoryForInfo,
     onCloseInfo,
@@ -104,24 +97,17 @@ export default function HomeOverlayModals({
 
     return (
         <>
-            {actionSheetMemory ? (
-                <MemoActionsSheet
-                    memory={selectedMemoryForActions ?? actionSheetMemory}
-                    onClose={onCloseActions}
-                    onOpenInfo={onOpenInfoFromActions}
-                    onStartWalkingRoute={onStartWalkingRoute}
-                    onOpenDrivingRoute={onOpenDrivingRoute}
-                    onShare={onShareFromActions}
-                    onDelete={onDeleteFromActions}
-                />
-            ) : null}
-
             <MemoInfoModal
                 visible={isInfoModalVisible}
                 memory={selectedMemoryForInfo}
                 readOnly={selectedMemoryForInfo?.isShared === true}
                 onClose={onCloseInfo}
                 onSave={onSaveInfo}
+                onWalk={onWalkFromInfo}
+                onDrive={onDriveFromInfo}
+                onShare={onShareFromInfo}
+                onDelete={onDeleteFromInfo}
+                onDismiss={onInfoDismissed}
             />
 
             <ShareMemoryModal

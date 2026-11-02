@@ -1,13 +1,15 @@
-export type PaidAction = 'plan' | 'import';
+export type PaidAction = 'plan' | 'import' | 'places';
 
 const SIGN_IN: Record<PaidAction, string> = {
     plan: 'Please sign in again to use trip planning.',
     import: 'Please sign in again to import a video.',
+    places: 'Please sign in again to search places.',
 };
 
 const LIMIT: Record<PaidAction, string> = {
     plan: "You've reached today's trip planning limit. Try again tomorrow.",
     import: "You've reached today's video import limit. Try again tomorrow.",
+    places: "You've reached today's place search limit. Try again tomorrow.",
 };
 
 const GENERIC = 'Something went wrong. Please try again.';

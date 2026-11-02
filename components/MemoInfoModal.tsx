@@ -1,3 +1,4 @@
+import MemoPhotoGallery from '@/components/MemoPhotoGallery';
 import { type Memory } from '@/context/MemoryContext';
 import { useAppTheme } from '@/context/ThemeContext';
 import {
@@ -6,7 +7,6 @@ import {
 } from '@/lib/geocoding';
 import { Ionicons } from '@expo/vector-icons';
 import { GoogleWord } from '@/components/GoogleWord';
-import { Image as ExpoImage } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
@@ -32,9 +32,25 @@ interface Props {
     readOnly?: boolean;
     onClose: () => void;
     onSave: (title: string, description: string) => void;
+    onWalk?: () => void;
+    onDrive?: () => void;
+    onShare?: () => void;
+    onDelete?: () => void;
+    onDismiss?: () => void;
 }
 
-export default function MemoInfoModal({ visible, memory, readOnly = false, onClose, onSave }: Props) {
+export default function MemoInfoModal({
+    visible,
+    memory,
+    readOnly = false,
+    onClose,
+    onSave,
+    onWalk,
+    onDrive,
+    onShare,
+    onDelete,
+    onDismiss,
+}: Props) {
     const { theme } = useAppTheme();
     const styles = useMemo(() => createStyles(theme.colors), [theme.colors]);
     const scrollRef = useRef<ScrollView>(null);
@@ -179,12 +195,39 @@ export default function MemoInfoModal({ visible, memory, readOnly = false, onClo
             transparent={true}
             animationType="slide"
             onRequestClose={handleClose}
+            onDismiss={onDismiss}
         >
             <View style={styles.overlay}>
                 <Pressable style={styles.backdropTap} onPress={handleClose} accessibilityRole="button" accessibilityLabel="Close" />
                 <View style={[styles.sheet, keyboardHeight > 0 && { marginBottom: keyboardHeight }]}>
                     <View style={styles.handleBar} />
-                    <Text style={styles.heading}>Memo details</Text>
+                    <View style={styles.headerRow}>
+                        <Text style={styles.heading}>Memo details</Text>
+                        <View style={styles.headerActions}>
+                            <TouchableOpacity
+                                onPress={handleClose}
+                                style={styles.headerClose}
+                                accessibilityRole="button"
+                                accessibilityLabel="Close"
+                            >
+                                <Text style={styles.closeButtonText}>Close</Text>
+                            </TouchableOpacity>
+                            {!memory?.isShared && onDelete ? (
+                                <TouchableOpacity
+                                    onPress={() => {
+                                        Keyboard.dismiss();
+                                        onDelete();
+                                    }}
+                                    style={styles.headerDelete}
+                                    accessibilityRole="button"
+                                    accessibilityLabel="Delete"
+                                >
+                                    <Ionicons name="trash-outline" size={14} color={theme.colors.danger} />
+                                    <Text style={styles.deleteButtonText}>Delete</Text>
+                                </TouchableOpacity>
+                            ) : null}
+                        </View>
+                    </View>
 
                     <ScrollView
                         ref={scrollRef}
@@ -193,14 +236,7 @@ export default function MemoInfoModal({ visible, memory, readOnly = false, onClo
                         keyboardShouldPersistTaps="handled"
                         showsVerticalScrollIndicator={false}
                     >
-                        {memory ? (
-                            <ExpoImage
-                                source={{ uri: memory.uri }}
-                                style={styles.heroImage}
-                                contentFit="cover"
-                                transition={200}
-                            />
-                        ) : null}
+                        {memory ? <MemoPhotoGallery memory={memory} /> : null}
 
                         <View style={styles.block}>
                             <View style={styles.labelRow}>
@@ -219,6 +255,34 @@ export default function MemoInfoModal({ visible, memory, readOnly = false, onClo
                             )}
                             {memory ? (
                                 <View style={styles.actionRow}>
+                                    {onWalk ? (
+                                        <TouchableOpacity
+                                            onPress={() => {
+                                                Keyboard.dismiss();
+                                                onWalk();
+                                            }}
+                                            style={styles.googleButton}
+                                            accessibilityRole="button"
+                                            accessibilityLabel="Walk"
+                                        >
+                                            <Ionicons name="walk-outline" size={15} color={theme.colors.accent} />
+                                            <Text style={styles.routeButtonText}>Walk</Text>
+                                        </TouchableOpacity>
+                                    ) : null}
+                                    {onDrive ? (
+                                        <TouchableOpacity
+                                            onPress={() => {
+                                                Keyboard.dismiss();
+                                                onDrive();
+                                            }}
+                                            style={styles.googleButton}
+                                            accessibilityRole="button"
+                                            accessibilityLabel="Drive"
+                                        >
+                                            <Ionicons name="car-outline" size={15} color={theme.colors.accent} />
+                                            <Text style={styles.routeButtonText}>Drive</Text>
+                                        </TouchableOpacity>
+                                    ) : null}
                                     <TouchableOpacity
                                         onPress={handleOpenGoogleMaps}
                                         style={styles.googleButton}
@@ -229,6 +293,20 @@ export default function MemoInfoModal({ visible, memory, readOnly = false, onClo
                                             <Text style={styles.googleMapsText}> Maps</Text>
                                         </Text>
                                     </TouchableOpacity>
+                                    {!memory.isShared && onShare ? (
+                                        <TouchableOpacity
+                                            onPress={() => {
+                                                Keyboard.dismiss();
+                                                onShare();
+                                            }}
+                                            style={styles.googleButton}
+                                            accessibilityRole="button"
+                                            accessibilityLabel="Share"
+                                        >
+                                            <Ionicons name="share-social-outline" size={15} color={theme.colors.accent} />
+                                            <Text style={styles.routeButtonText}>Share</Text>
+                                        </TouchableOpacity>
+                                    ) : null}
                                     {memory.source === 'video_import' && !!memory.sourceUrl && !!sourcePlatform && (
                                         <TouchableOpacity onPress={handleOpenSourceUrl} activeOpacity={0.8}>
                                             {sourcePlatform === 'instagram' ? (
@@ -308,13 +386,6 @@ export default function MemoInfoModal({ visible, memory, readOnly = false, onClo
                                 <Text className="text-white font-bold text-base">Save</Text>
                             </TouchableOpacity>
                         ) : null}
-
-                        <TouchableOpacity
-                            onPress={handleClose}
-                            style={[styles.closeButton, editable ? styles.closeButtonEditable : styles.closeButtonReadOnly]}
-                        >
-                            <Text style={styles.closeButtonText}>Close</Text>
-                        </TouchableOpacity>
                     </ScrollView>
                 </View>
             </View>
@@ -350,24 +421,46 @@ const createStyles = (colors: ThemeColors) => StyleSheet.create({
         backgroundColor: colors.handle,
         marginBottom: 12,
     },
+    headerRow: {
+        flexDirection: 'row',
+        alignItems: 'flex-start',
+        justifyContent: 'space-between',
+        gap: 12,
+        marginBottom: 12,
+    },
+    headerActions: {
+        alignItems: 'flex-end',
+        gap: 8,
+    },
     heading: {
+        flex: 1,
         fontSize: 20,
         fontWeight: '700',
         color: colors.text,
-        marginBottom: 12,
+    },
+    headerClose: {
+        paddingHorizontal: 12,
+        paddingVertical: 6,
+        borderRadius: 12,
+        backgroundColor: colors.surfaceMuted,
+    },
+    headerDelete: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: 4,
+        paddingHorizontal: 10,
+        paddingVertical: 5,
+        borderRadius: 999,
+        backgroundColor: colors.dangerSoft,
+        borderWidth: 1,
+        borderColor: colors.danger,
     },
     scroll: {
         maxHeight: 520,
     },
     scrollContent: {
         paddingBottom: 12,
-    },
-    heroImage: {
-        width: '100%',
-        height: 200,
-        borderRadius: 16,
-        backgroundColor: colors.surfaceMuted,
-        marginBottom: 16,
     },
     block: {
         marginBottom: 18,
@@ -432,6 +525,16 @@ const createStyles = (colors: ThemeColors) => StyleSheet.create({
         fontSize: 13,
         fontWeight: '700',
     },
+    routeButtonText: {
+        fontSize: 13,
+        fontWeight: '700',
+        color: colors.text,
+    },
+    deleteButtonText: {
+        fontSize: 13,
+        fontWeight: '700',
+        color: colors.danger,
+    },
     googleMapsText: {
         color: colors.textSecondary,
     },
@@ -455,18 +558,6 @@ const createStyles = (colors: ThemeColors) => StyleSheet.create({
         color: colors.text,
         backgroundColor: colors.input,
         fontSize: 16,
-    },
-    closeButton: {
-        padding: 12,
-        borderRadius: 12,
-        alignItems: 'center',
-        backgroundColor: colors.surfaceMuted,
-    },
-    closeButtonEditable: {
-        marginTop: 12,
-    },
-    closeButtonReadOnly: {
-        marginTop: 16,
     },
     closeButtonText: {
         color: colors.textSecondary,

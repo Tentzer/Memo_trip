@@ -1,4 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
+import { useBottomTabBarHeight } from '@react-navigation/bottom-tabs';
 import React, { useRef, useState } from 'react';
 import {
     ActivityIndicator,
@@ -17,6 +18,7 @@ import { useAuth } from '@/context/AuthContext';
 import { useMemories } from '@/context/MemoryContext';
 import { useAppTheme } from '@/context/ThemeContext';
 import { usePlanAgent } from '@/hooks/usePlanAgent';
+import { placePhotoUri } from '@/lib/places/placePhoto';
 import { alertRequireSignIn } from '@/lib/requireSignInAlert';
 import type { ChatMessage as ChatMessageType, PlanStop, RecommendedPlace } from '@/types/plan';
 
@@ -25,6 +27,7 @@ const PLACEHOLDER_URL = 'https://placehold.co/400x400/e2e8f0/94a3b8.png?text=?';
 export default function PlanScreen() {
     const { user } = useAuth();
     const { theme } = useAppTheme();
+    const tabBarHeight = useBottomTabBarHeight();
     const styles = React.useMemo(() => createStyles(theme.colors), [theme.colors]);
     const [inputText, setInputText] = useState('');
     const { messages, loading, sendMessage, clearMessages } = usePlanAgent();
@@ -48,17 +51,13 @@ export default function PlanScreen() {
 
     const handleAddStopToMap = async (stop: PlanStop): Promise<void> => {
         if (!ensureSignedIn('Sign in to save this stop to your memos.')) return;
-        const photoUri = stop.photoReference
-            ? `https://maps.googleapis.com/maps/api/place/photo?maxwidth=1200&photo_reference=${stop.photoReference}&key=${GOOGLE_API_KEY}`
-            : PLACEHOLDER_URL;
+        const photoUri = placePhotoUri(stop.photoReference, GOOGLE_API_KEY) ?? PLACEHOLDER_URL;
         await addPlaceMemory(photoUri, stop.lat, stop.lng, stop.country, stop.name);
     };
 
     const handleSaveToMemories = async (place: RecommendedPlace): Promise<void> => {
         if (!ensureSignedIn('Sign in to save this place to your memos.')) return;
-        const photoUri = place.photoReference
-            ? `https://maps.googleapis.com/maps/api/place/photo?maxwidth=1200&photo_reference=${place.photoReference}&key=${GOOGLE_API_KEY}`
-            : PLACEHOLDER_URL;
+        const photoUri = placePhotoUri(place.photoReference, GOOGLE_API_KEY) ?? PLACEHOLDER_URL;
         await addPlaceMemory(
             photoUri,
             place.lat,
@@ -66,6 +65,7 @@ export default function PlanScreen() {
             place.country,
             place.description || undefined,
             place.name,
+            { placeCategory: place.placeCategory },
         );
     };
 
@@ -121,7 +121,7 @@ export default function PlanScreen() {
                     />
                 )}
 
-                <View style={styles.inputBar}>
+                <View style={[styles.inputBar, { marginBottom: tabBarHeight }]}>
                     {messages.length > 0 && (
                         <TouchableOpacity
                             style={styles.clearButton}

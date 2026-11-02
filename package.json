@@ -11,7 +11,7 @@
     "lint": "expo lint",
     "test": "jest",
     "postinstall": "patch-package",
-    "test:plan-agent": "npx --yes deno test --allow-env --config supabase/functions/deno.json ./supabase/functions/plan-agent/ ./supabase/functions/_shared/",
+    "test:plan-agent": "npx --yes deno test --allow-env --unstable-sloppy-imports --config supabase/functions/deno.json ./supabase/functions/plan-agent/ ./supabase/functions/_shared/ ./supabase/functions/places-proxy/",
     "backfill:memory-thumbs": "node scripts/backfill-memory-thumbnails.mjs",
     "backfill:memory-geo": "node scripts/backfill-memory-country-address-once.mjs",
     "purge:soft-deleted-memos": "node scripts/purge-soft-deleted-memos-once.mjs",
@@ -35,6 +35,7 @@
     "expo-blur": "~15.0.8",
     "expo-constants": "~18.0.13",
     "expo-crypto": "~15.0.8",
+    "expo-file-system": "~19.0.21",
     "expo-font": "~14.0.11",
     "expo-haptics": "~15.0.8",
     "expo-image": "~3.0.11",
@@ -64,6 +65,7 @@
     "react-native-screens": "~4.16.0",
     "react-native-web": "~0.21.0",
     "react-native-worklets": "0.5.1",
+    "supercluster": "^9.1.0",
     "tailwindcss": "^3.4.19"
   },
   "devDependencies": {
@@ -91,7 +93,9 @@
       "<rootDir>/supabase/"
     ],
     "moduleNameMapper": {
-      "^@/(.*)$": "<rootDir>/$1"
+      "^@/(.*)$": "<rootDir>/$1",
+      "^(\\.{1,2}/.*)\\.ts$": "$1",
+      "^supercluster$": "<rootDir>/node_modules/supercluster/dist/supercluster.js"
     }
   }
 }
