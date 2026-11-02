@@ -5,6 +5,7 @@ import {
     type MapMemoryPin,
     type MapPinCluster,
 } from '@/lib/mapMemoryPins';
+import { markerItemKey } from '@/lib/visibleMapMarkers';
 import Supercluster, { type ClusterFeature, type PointFeature } from 'supercluster';
 
 /**
@@ -70,6 +71,7 @@ export function createMapClusterIndex(pins: readonly MapMemoryPin[]): MapCluster
                 const pin = ordered[feature.properties.pinIndex];
                 if (pin) items.push({ type: 'pin', pin });
             }
+            items.sort((a, b) => markerItemKey(a).localeCompare(markerItemKey(b)));
             return items;
         },
     };
@@ -123,9 +125,12 @@ function clusterFromFeature(
         if (!current || isNewerMemory(member.memory, current.memory)) return member;
         return current;
     }, null);
-    if (!newest) return null;
+    const anchor = members[0];
+    if (!newest || !anchor) return null;
     return {
-        id: `cluster:${clusterId}`,
+        // Lowest member id, not supercluster's cluster_id. The numeric id changes
+        // at every zoom and would reshuffle this marker among its neighbors.
+        id: `cluster:${anchor.memory.id}`,
         latitude: coordinates[1] ?? newest.memory.latitude,
         longitude: coordinates[0] ?? newest.memory.longitude,
         count: pointCount,

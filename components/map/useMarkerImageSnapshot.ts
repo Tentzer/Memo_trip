@@ -1,3 +1,4 @@
+import { paintedMarkerPhase, rememberPaintedMarker } from '@/lib/markerImageCache';
 import { ensureMarkerIconFonts, markerIconFontsReady } from '@/lib/markerIconFonts';
 import {
     MARKER_PAINT_WINDOW_MS,
@@ -17,22 +18,27 @@ export function useMarkerImageSnapshot(
     imageUri: string,
     viewRevision = imageUri,
     waitForIconFont = false,
+    memoryId?: string,
 ): {
     tracksViewChanges: boolean;
     phase: MarkerImagePhase;
     onLoad: () => void;
     onError: () => void;
 } {
+    const restored = memoryId ? paintedMarkerPhase(memoryId, imageUri) : null;
     const [tracksViewChanges, setTracksViewChanges] = useState(false);
     const [trackedUri, setTrackedUri] = useState(imageUri);
-    const [phase, setPhase] = useState<MarkerImagePhase>(imageUri ? 'loading' : 'error');
+    const [phase, setPhase] = useState<MarkerImagePhase>(restored ?? (imageUri ? 'loading' : 'error'));
     const mountedRef = useRef(true);
+    const skipRevisionRef = useRef<string | null>(restored ? viewRevision : null);
     const releaseRef = useRef<MarkerSnapshotRelease | null>(null);
     const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
     if (trackedUri !== imageUri) {
+        const nextRestored = memoryId ? paintedMarkerPhase(memoryId, imageUri) : null;
+        skipRevisionRef.current = nextRestored ? viewRevision : null;
         setTrackedUri(imageUri);
-        setPhase(imageUri ? 'loading' : 'error');
+        setPhase(nextRestored ?? (imageUri ? 'loading' : 'error'));
         setTracksViewChanges(false);
     }
 
@@ -47,6 +53,7 @@ export function useMarkerImageSnapshot(
 
     useEffect(() => {
         if (phase === 'loading') return undefined;
+        if (skipRevisionRef.current === viewRevision) return undefined;
         let cancelled = false;
 
         const fontsReadyAtStart = !waitForIconFont || markerIconFontsReady();
@@ -70,6 +77,9 @@ export function useMarkerImageSnapshot(
             setTracksViewChanges(true);
             timerRef.current = setTimeout(() => {
                 timerRef.current = null;
+                if (memoryId && (phase === 'loaded' || phase === 'error')) {
+                    rememberPaintedMarker(memoryId, imageUri, phase);
+                }
                 if (mountedRef.current) setTracksViewChanges(false);
                 release();
                 if (releaseRef.current === release) releaseRef.current = null;
@@ -81,7 +91,7 @@ export function useMarkerImageSnapshot(
             clearWindow();
             if (mountedRef.current) setTracksViewChanges(false);
         };
-    }, [clearWindow, imageUri, phase, viewRevision, waitForIconFont]);
+    }, [clearWindow, imageUri, memoryId, phase, viewRevision, waitForIconFont]);
 
     useEffect(() => {
         mountedRef.current = true;

@@ -10,6 +10,7 @@ import { useMarkerImageSnapshot, type MarkerImagePhase } from '@/components/map/
 import { useAppTheme } from '@/context/ThemeContext';
 import { categoryBadgeForMapMarker, pinPlaceholderAppearance } from '@/lib/markerCategoryBadge';
 import { ensureMarkerIconFonts } from '@/lib/markerIconFonts';
+import { cachedMarkerCoordinate } from '@/lib/markerPinProps';
 import { formatClusterCount, pinImageUri, type MapPinCluster } from '@/lib/mapMemoryPins';
 import type { Memory, MemoryPlaceCategory } from '@/types/memory';
 import { Ionicons } from '@expo/vector-icons';
@@ -165,13 +166,15 @@ function MapMemoryMarkerComponent({ memory, variant, onMarkerPress }: MapMemoryM
         imageUri,
         category ? `${imageUri}|${category}` : imageUri,
         category != null,
+        memory.id,
     );
+    const coordinate = cachedMarkerCoordinate(memory.id, memory.latitude, memory.longitude);
     const videoImport = memory.source === 'video_import';
 
     return (
         <Marker
             identifier={memory.id}
-            coordinate={{ latitude: memory.latitude, longitude: memory.longitude }}
+            coordinate={coordinate}
             zIndex={999}
             onPress={(event) => {
                 event.stopPropagation?.();
@@ -220,6 +223,7 @@ function MapClusterMarkerComponent({ cluster, onPress }: MapClusterMarkerProps) 
         imageUri,
         `${imageUri}|${cluster.count}|${frame}|${ring}|${cluster.newest.variant}`,
     );
+    const coordinate = cachedMarkerCoordinate(cluster.id, cluster.latitude, cluster.longitude);
     const label = mixed
         ? `${cluster.count} memos, yours and shared`
         : cluster.hasShared
@@ -229,7 +233,7 @@ function MapClusterMarkerComponent({ cluster, onPress }: MapClusterMarkerProps) 
     return (
         <Marker
             identifier={cluster.id}
-            coordinate={{ latitude: cluster.latitude, longitude: cluster.longitude }}
+            coordinate={coordinate}
             zIndex={1000}
             onPress={(event) => {
                 event.stopPropagation?.();

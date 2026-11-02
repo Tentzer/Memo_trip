@@ -1,5 +1,7 @@
 import { describe, expect, it } from '@jest/globals';
 import { clusterMapPins, createMapClusterIndex, queryMapClusters } from '@/lib/mapClusterIndex';
+import { pinMarkerProps } from '@/lib/markerPinProps';
+import { markerItemKey, planMountedMarkers, reuseStableMarkerItems } from '@/lib/visibleMapMarkers';
 import {
     CLUSTER_ZOOM_SETTLE_MS,
     CLUSTER_RADIUS_PX,
@@ -241,7 +243,7 @@ describe('map pin clustering', () => {
         if (firstCluster?.type !== 'cluster' || secondCluster?.type !== 'cluster') {
             throw new Error('expected clusters');
         }
-        expect(firstCluster.cluster.id).toMatch(/^cluster:\d+$/);
+        expect(firstCluster.cluster.id).toBe('cluster:a');
         expect(secondCluster.cluster.id).toBe(firstCluster.cluster.id);
         expect(firstCluster.cluster.count).toBe(2);
         expect(first.filter((item) => item.type === 'pin')).toHaveLength(1);
@@ -274,6 +276,46 @@ describe('map pin clustering', () => {
             longitudeDelta: 1,
         }, zoom, 0);
         expect(memberCount(wide)).toBe(3);
+    });
+
+    it('keeps a pin key and props identical across zooms when membership is unchanged', () => {
+        const index = createMapClusterIndex([far, closer, near]);
+        const region = {
+            latitude: origin,
+            longitude: 34,
+            latitudeDelta: 1,
+            longitudeDelta: 1,
+        };
+        const grouped = queryMapClusters(index, region, zoom, 0.45);
+        const split = queryMapClusters(index, region, MAX_CLUSTER_ZOOM, 0.45);
+        const soloGrouped = grouped.find((item) => item.type === 'pin' && item.pin.memory.id === 'c');
+        const soloSplit = split.find((item) => item.type === 'pin' && item.pin.memory.id === 'c');
+        if (soloGrouped?.type !== 'pin' || soloSplit?.type !== 'pin') {
+            throw new Error('expected the far pin to stay individual');
+        }
+        expect(markerItemKey(soloGrouped)).toBe('owned:c');
+        expect(markerItemKey(soloSplit)).toBe(markerItemKey(soloGrouped));
+        expect(soloSplit.pin).toBe(soloGrouped.pin);
+        expect(pinMarkerProps(soloSplit.pin)).toBe(pinMarkerProps(soloGrouped.pin));
+        expect(pinMarkerProps(soloSplit.pin).coordinate).toBe(pinMarkerProps(soloGrouped.pin).coordinate);
+        expect(grouped.map(markerItemKey)).toEqual([...grouped.map(markerItemKey)].sort());
+        expect(split.map(markerItemKey)).toEqual([...split.map(markerItemKey)].sort());
+
+        const neighborhood = queryMapClusters(index, region, 15, 0.45);
+        const stillNeighborhood = queryMapClusters(index, region, MAX_CLUSTER_ZOOM, 0.45);
+        const stable = reuseStableMarkerItems(neighborhood, stillNeighborhood);
+        expect(stable.map(markerItemKey)).toEqual(neighborhood.map(markerItemKey));
+        expect(stable.find((item) => markerItemKey(item) === 'owned:c')).toBe(
+            neighborhood.find((item) => markerItemKey(item) === 'owned:c'),
+        );
+        const mounted = planMountedMarkers(neighborhood, stable);
+        expect(mounted.map(markerItemKey)).toEqual(stable.map(markerItemKey));
+        expect(mounted.find((item) => markerItemKey(item) === 'owned:c')).toBe(
+            neighborhood.find((item) => markerItemKey(item) === 'owned:c'),
+        );
+        expect(grouped.find((item) => item.type === 'cluster' && item.cluster.id === 'cluster:a')).toBeTruthy();
+        const zoomedOut = queryMapClusters(index, region, zoom - 1, 0.45);
+        expect(zoomedOut.find((item) => item.type === 'cluster' && item.cluster.id === 'cluster:a')).toBeTruthy();
     });
 });
 

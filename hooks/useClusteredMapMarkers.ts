@@ -17,11 +17,15 @@ import {
     type MapPinCluster,
 } from '@/lib/mapMemoryPins';
 import {
-    MARKER_MOUNT_BATCH,
     MARKER_REGION_PADDING,
-    nextMarkerMountCount,
+    MAX_MOUNTED_MARKERS,
+    markerItemKey,
+    planMountedMarkers,
+    reuseStableMarkerItems,
+    sameMarkerList,
     selectVisibleMarkers,
     shouldRefreshMarkerRegion,
+    stableMarkerOrder,
 } from '@/lib/visibleMapMarkers';
 import { useMapMarkerReveal } from '@/hooks/useMapMarkerReveal';
 import type { Memory } from '@/types/memory';
@@ -68,10 +72,11 @@ export function useClusteredMapMarkers({
     const zoomGateRef = useRef(createClusterZoomGate(initialZoom));
     const settleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const settleTokenRef = useRef(0);
-    const mountZoomRef = useRef(initialZoom);
-    const shownCountRef = useRef(0);
     const [markerRegion, setMarkerRegion] = useState<Region | null>(null);
-    const [mountCount, setMountCount] = useState(0);
+    const visibleRef = useRef<MapMarkerItem[]>([]);
+    const mountedRef = useRef<MapMarkerItem[]>([]);
+    const mountedKeysRef = useRef<ReadonlySet<string>>(new Set());
+    const [mountedItems, setMountedItems] = useState<MapMarkerItem[]>([]);
 
     const clearSettleTimer = useCallback(() => {
         if (settleTimerRef.current == null) return;
@@ -93,10 +98,19 @@ export function useClusteredMapMarkers({
         if (!markerRegion) return [];
         return queryMapClusters(clusterIndex, markerRegion, clusterZoom, MARKER_REGION_PADDING);
     }, [clusterIndex, markerRegion, clusterZoom]);
-    const visibleMarkers = useMemo(
-        () => selectVisibleMarkers(clusteredMarkers, markerRegion),
-        [clusteredMarkers, markerRegion],
-    );
+    const visibleMarkers = useMemo(() => {
+        const selected = selectVisibleMarkers(
+            clusteredMarkers,
+            markerRegion,
+            MAX_MOUNTED_MARKERS,
+            mountedKeysRef.current,
+        );
+        const ordered = stableMarkerOrder(visibleRef.current, selected);
+        const reused = reuseStableMarkerItems(visibleRef.current, ordered);
+        visibleRef.current = reused;
+        return reused;
+    }, [clusteredMarkers, markerRegion]);
+    mountedKeysRef.current = new Set(visibleMarkers.map((item) => markerItemKey(item)));
     const revealCount = useMapMarkerReveal(
         visibleMarkers,
         showMemoriesOnMap,
@@ -111,31 +125,33 @@ export function useClusteredMapMarkers({
     }, [showMemoriesOnMap, isMemoriesMapLoading, visibleMarkers, revealCount]);
 
     useEffect(() => {
-        const zoomChanged = mountZoomRef.current !== clusterZoom;
-        mountZoomRef.current = clusterZoom;
-        const total = revealedMarkers.length;
-        const replaceGeneration = zoomChanged
-            && (shownCountRef.current > MARKER_MOUNT_BATCH || total > MARKER_MOUNT_BATCH);
+        // Add and remove only the markers whose keys changed. Clearing the list
+        // on zoom remounts every pin and the snapshot paints the placeholder again.
         let cancelled = false;
-        let shown = replaceGeneration ? 0 : total;
-        shownCountRef.current = shown;
-        setMountCount(shown);
-
-        if (shown >= total) return undefined;
+        const desired = revealedMarkers;
+        const publish = (from: readonly MapMarkerItem[]) => {
+            const next = planMountedMarkers(from, desired);
+            if (sameMarkerList(from, next)) return from;
+            mountedRef.current = next;
+            setMountedItems(next);
+            return next;
+        };
+        let current = publish(mountedRef.current);
+        if (current.length >= desired.length) return undefined;
 
         const step = () => {
             if (cancelled) return;
-            shown = nextMarkerMountCount(shown, total);
-            shownCountRef.current = shown;
-            setMountCount(shown);
-            if (shown < total) requestAnimationFrame(step);
+            current = publish(current);
+            if (current.length < desired.length) {
+                frame = requestAnimationFrame(step);
+            }
         };
-        const frame = requestAnimationFrame(step);
+        let frame = requestAnimationFrame(step);
         return () => {
             cancelled = true;
             cancelAnimationFrame(frame);
         };
-    }, [clusterZoom, revealedMarkers]);
+    }, [revealedMarkers]);
 
     useEffect(() => {
         let cancelled = false;
@@ -168,10 +184,7 @@ export function useClusteredMapMarkers({
         };
     }, [visibleMarkers]);
 
-    const markerItemsToRender = useMemo(
-        () => revealedMarkers.slice(0, mountCount),
-        [revealedMarkers, mountCount],
-    );
+    const markerItemsToRender = mountedItems;
 
     const handleRegionChangeComplete = useCallback((region: Region) => {
         mapRegionRef.current = region;

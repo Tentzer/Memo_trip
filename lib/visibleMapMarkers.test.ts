@@ -1,9 +1,12 @@
 import { describe, expect, it } from '@jest/globals';
 import {
     MAX_MOUNTED_MARKERS,
+    markerItemKey,
     nextMarkerMountCount,
+    planMountedMarkers,
     selectVisibleMarkers,
     shouldRefreshMarkerRegion,
+    stableMarkerOrder,
 } from '@/lib/visibleMapMarkers';
 import type { MapMarkerItem } from '@/lib/mapMemoryPins';
 import type { Region } from 'react-native-maps';
@@ -65,5 +68,38 @@ describe('visible map markers', () => {
         expect(nextMarkerMountCount(0, 20, 8)).toBe(8);
         expect(nextMarkerMountCount(16, 20, 8)).toBe(20);
         expect(nextMarkerMountCount(0, 0, 8)).toBe(0);
+    });
+
+    it('keeps already mounted pins and adds one batch of newcomers', () => {
+        const previous = Array.from({ length: 10 }, (_, index) =>
+            pinAt(`p${index}`, region.latitude, region.longitude + index * 0.0001),
+        );
+        const next = Array.from({ length: 20 }, (_, index) =>
+            pinAt(`p${index}`, region.latitude, region.longitude + index * 0.0001),
+        );
+        const frame = planMountedMarkers(previous, next, 8);
+        expect(frame).toHaveLength(18);
+        for (const item of previous) {
+            expect(frame.map(markerItemKey)).toContain(markerItemKey(item));
+        }
+        expect(planMountedMarkers([], next, 8)).toHaveLength(next.length);
+    });
+
+    it('keeps a mounted pin that is still in view when nearer pins would fill the cap', () => {
+        const items = Array.from({ length: MAX_MOUNTED_MARKERS + 8 }, (_, index) =>
+            pinAt(`p${index}`, region.latitude + index * 0.001, region.longitude),
+        );
+        const farId = `p${MAX_MOUNTED_MARKERS + 6}`;
+        const selected = selectVisibleMarkers(items, region, MAX_MOUNTED_MARKERS, new Set([`owned:${farId}`]));
+        expect(selected).toHaveLength(MAX_MOUNTED_MARKERS);
+        expect(selected.map(markerItemKey)).toContain(`owned:${farId}`);
+        const nearestOnly = selectVisibleMarkers(items, region);
+        expect(nearestOnly.map(markerItemKey)).not.toContain(`owned:${farId}`);
+    });
+
+    it('keeps an existing pin at its index when a new pin would sort before it', () => {
+        const kept = pinAt('m', region.latitude, region.longitude);
+        const added = pinAt('a', region.latitude, region.longitude);
+        expect(stableMarkerOrder([kept], [added, kept]).map(markerItemKey)).toEqual(['owned:m', 'owned:a']);
     });
 });
