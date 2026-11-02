@@ -9,6 +9,8 @@ import React, { useContext } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 const PILL_GAP_ABOVE_SAFE_AREA = 10;
+const PILL_HEIGHT = 58;
+const ICON_SIZE = 22;
 
 function isHiddenTab(style: BottomTabBarProps['descriptors'][string]['options']['tabBarItemStyle']): boolean {
     const flat = StyleSheet.flatten(style);
@@ -49,12 +51,7 @@ export default function FloatingTabBar({ state, descriptors, navigation, insets 
                     {routes.map((route) => {
                         const { options } = descriptors[route.key];
                         const focused = state.routes[state.index]?.key === route.key;
-                        const isCamera = route.name === 'TakePicture';
-                        const color = isCamera
-                            ? '#FFFFFF'
-                            : focused
-                                ? theme.colors.accent
-                                : theme.colors.tabInactive;
+                        const color = focused ? theme.colors.accent : theme.colors.tabInactive;
                         const label = options.title ?? route.name;
                         const onPress = () => {
                             const event = navigation.emit({
@@ -76,17 +73,8 @@ export default function FloatingTabBar({ state, descriptors, navigation, insets 
                                 onPress={onPress}
                                 style={styles.item}
                             >
-                                {isCamera ? (
-                                    <View style={[styles.cameraButton, { backgroundColor: theme.colors.accent }]}>
-                                        {options.tabBarIcon?.({ focused: true, color, size: 26 })}
-                                    </View>
-                                ) : (
-                                    options.tabBarIcon?.({ focused, color, size: 22 })
-                                )}
-                                <Text
-                                    numberOfLines={1}
-                                    style={[styles.label, { color: isCamera ? theme.colors.accentText : color }]}
-                                >
+                                {options.tabBarIcon?.({ focused, color, size: ICON_SIZE })}
+                                <Text numberOfLines={1} style={[styles.label, { color }]}>
                                     {label}
                                 </Text>
                             </Pressable>
@@ -104,10 +92,10 @@ const styles = StyleSheet.create({
         left: 0,
         right: 0,
         bottom: 0,
-        paddingHorizontal: 16,
+        paddingHorizontal: 28,
     },
     shadow: {
-        borderRadius: 32,
+        borderRadius: PILL_HEIGHT / 2,
         shadowOffset: { width: 0, height: 8 },
         shadowOpacity: 0.16,
         shadowRadius: 18,
@@ -115,32 +103,25 @@ const styles = StyleSheet.create({
     },
     pill: {
         overflow: 'hidden',
-        borderRadius: 32,
+        borderRadius: PILL_HEIGHT / 2,
         flexDirection: 'row',
-        alignItems: 'flex-end',
-        justifyContent: 'space-between',
-        paddingHorizontal: 8,
-        paddingTop: 8,
-        paddingBottom: 8,
+        alignItems: 'center',
+        justifyContent: 'center',
+        height: PILL_HEIGHT,
+        paddingHorizontal: 4,
     },
     item: {
         flex: 1,
         alignItems: 'center',
-        justifyContent: 'flex-end',
-        gap: 4,
-        minHeight: 58,
-    },
-    cameraButton: {
-        width: 46,
-        height: 46,
-        borderRadius: 23,
-        alignItems: 'center',
         justifyContent: 'center',
-        marginTop: -6,
+        gap: 2,
+        height: '100%',
     },
     label: {
-        fontSize: 11,
+        fontSize: 10,
+        lineHeight: 12,
         fontWeight: '600',
-        letterSpacing: 0.1,
+        textAlign: 'center',
+        width: '100%',
     },
 });
