@@ -5,16 +5,21 @@ import {
     SHARED_PIN_COLOR,
     markerStyles,
 } from '@/components/map/markerStyles';
+import { PlaceCategoryIcon } from '@/components/PlaceCategoryIcon';
 import { useMarkerImageSnapshot, type MarkerImagePhase } from '@/components/map/useMarkerImageSnapshot';
 import { useAppTheme } from '@/context/ThemeContext';
+import { categoryBadgeForMapMarker } from '@/lib/markerCategoryBadge';
+import { ensureMarkerIconFonts } from '@/lib/markerIconFonts';
 import { formatClusterCount, pinImageUri, type MapPinCluster } from '@/lib/mapMemoryPins';
-import type { Memory } from '@/types/memory';
+import type { Memory, MemoryPlaceCategory } from '@/types/memory';
 import { Ionicons } from '@expo/vector-icons';
 import { Image as ExpoImage } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
 import React from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import { Marker } from 'react-native-maps';
+
+void ensureMarkerIconFonts();
 
 type PinFrame = 'owned' | 'shared';
 type PinRing = 'owned' | 'shared' | 'mixed' | 'video';
@@ -44,6 +49,7 @@ function PinBody({
     ring,
     stem,
     badge,
+    category,
 }: {
     imageUri: string;
     phase: MarkerImagePhase;
@@ -53,6 +59,7 @@ function PinBody({
     ring: PinRing;
     stem: string;
     badge?: string;
+    category?: MemoryPlaceCategory | null;
 }) {
     const { theme } = useAppTheme();
     const sharedFrame = frame === 'shared';
@@ -129,13 +136,23 @@ function PinBody({
                     <Text allowFontScaling={false} style={markerStyles.countBadgeText}>{badge}</Text>
                 </View>
             ) : null}
+            {category ? (
+                <View style={markerStyles.categoryBadge}>
+                    <PlaceCategoryIcon category={category} size={11} color="#374151" />
+                </View>
+            ) : null}
         </View>
     );
 }
 
 function MapMemoryMarkerComponent({ memory, variant, onMarkerPress }: MapMemoryMarkerProps) {
     const imageUri = pinImageUri(memory);
-    const snapshot = useMarkerImageSnapshot(imageUri);
+    const category = categoryBadgeForMapMarker({ type: 'pin', placeCategory: memory.placeCategory });
+    const snapshot = useMarkerImageSnapshot(
+        imageUri,
+        category ? `${imageUri}|${category}` : imageUri,
+        category != null,
+    );
     const videoImport = memory.source === 'video_import';
 
     return (
@@ -160,6 +177,7 @@ function MapMemoryMarkerComponent({ memory, variant, onMarkerPress }: MapMemoryM
                 frame={variant}
                 ring={videoImport ? 'video' : variant}
                 stem={stemColor(variant, videoImport)}
+                category={category}
             />
         </Marker>
     );
@@ -173,7 +191,8 @@ function sameMemoryMarker(prev: MapMemoryMarkerProps, next: MapMemoryMarkerProps
         && prev.memory.thumb_uri === next.memory.thumb_uri
         && prev.memory.latitude === next.memory.latitude
         && prev.memory.longitude === next.memory.longitude
-        && prev.memory.source === next.memory.source;
+        && prev.memory.source === next.memory.source
+        && prev.memory.placeCategory === next.memory.placeCategory;
 }
 
 export const MapMemoryMarker = React.memo(MapMemoryMarkerComponent, sameMemoryMarker);

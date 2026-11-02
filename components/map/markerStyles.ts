@@ -87,4 +87,17 @@ export const markerStyles = StyleSheet.create({
         fontSize: 11,
         fontWeight: '800',
     },
+    categoryBadge: {
+        position: 'absolute',
+        top: 0,
+        right: 2,
+        width: 18,
+        height: 18,
+        borderRadius: 9,
+        backgroundColor: '#ffffff',
+        borderWidth: 1,
+        borderColor: '#e2e8f0',
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
 });

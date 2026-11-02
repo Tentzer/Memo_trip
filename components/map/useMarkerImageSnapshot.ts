@@ -1,3 +1,4 @@
+import { ensureMarkerIconFonts, markerIconFontsReady } from '@/lib/markerIconFonts';
 import {
     MARKER_PAINT_WINDOW_MS,
     markerSnapshotScheduler,
@@ -12,7 +13,11 @@ export type MarkerImagePhase = 'loading' | 'loaded' | 'error';
  * Track only after the photo is in the React tree, and only for a few markers at a time,
  * long enough for the native snapshot to include the pixels.
  */
-export function useMarkerImageSnapshot(imageUri: string, viewRevision = imageUri): {
+export function useMarkerImageSnapshot(
+    imageUri: string,
+    viewRevision = imageUri,
+    waitForIconFont = false,
+): {
     tracksViewChanges: boolean;
     phase: MarkerImagePhase;
     onLoad: () => void;
@@ -44,7 +49,19 @@ export function useMarkerImageSnapshot(imageUri: string, viewRevision = imageUri
         if (phase === 'loading') return undefined;
         let cancelled = false;
 
-        void markerSnapshotScheduler.acquire().then((release) => {
+        const fontsReadyAtStart = !waitForIconFont || markerIconFontsReady();
+        void (async () => {
+            if (waitForIconFont) await ensureMarkerIconFonts();
+            if (cancelled || !mountedRef.current) return;
+            if (!fontsReadyAtStart) {
+                await new Promise<void>((resolve) => {
+                    requestAnimationFrame(() => {
+                        requestAnimationFrame(() => resolve());
+                    });
+                });
+            }
+            if (cancelled || !mountedRef.current) return;
+            const release = await markerSnapshotScheduler.acquire();
             if (cancelled || !mountedRef.current) {
                 release();
                 return;
@@ -57,14 +74,14 @@ export function useMarkerImageSnapshot(imageUri: string, viewRevision = imageUri
                 release();
                 if (releaseRef.current === release) releaseRef.current = null;
             }, MARKER_PAINT_WINDOW_MS);
-        });
+        })();
 
         return () => {
             cancelled = true;
             clearWindow();
             if (mountedRef.current) setTracksViewChanges(false);
         };
-    }, [clearWindow, imageUri, phase, viewRevision]);
+    }, [clearWindow, imageUri, phase, viewRevision, waitForIconFont]);
 
     useEffect(() => {
         mountedRef.current = true;
