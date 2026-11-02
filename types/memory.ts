@@ -29,11 +29,6 @@ export interface Memory {
     excludeFromCountryFolder?: boolean;
     source?: 'video_import';
     sourceUrl?: string;
-    /**
-     * Up to 5 Google Place photo_reference values.
-     * Index 0 is the stored pin photo. Later refs are fetched only in the details gallery.
-     */
-    placePhotoRefs?: string[] | null;
 }
 
 export interface CustomFolder {

@@ -7,7 +7,6 @@ export interface RecommendedPlace {
     userRatingsTotal: number;
     placeId: string;
     photoReference: string | null;
-    photoReferences?: string[];
     lat: number;
     lng: number;
     country: string;

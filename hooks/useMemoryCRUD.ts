@@ -3,7 +3,6 @@ import { deleteOwnedMemory } from '@/lib/deleteOwnedMemory';
 import { uploadPicture } from '@/lib/memoryApi';
 import { loadMemoryMeta, saveMemoryMeta } from '@/lib/memoryStorage';
 import { normalizePlaceCategory } from '@/lib/placeCategory';
-import { normalizePlacePhotoRefs } from '@/lib/placePhotoRefs';
 import { alertRequireSignIn } from '@/lib/requireSignInAlert';
 import { supabase } from '@/lib/supabase';
 import { Memory } from '@/types/memory';
@@ -26,7 +25,6 @@ interface AddPlaceMemoryOptions {
     source?: 'video_import';
     sourceUrl?: string;
     placeCategory?: Memory['placeCategory'];
-    placePhotoRefs?: string[] | null;
 }
 
 export function useMemoryCRUD({
@@ -115,7 +113,6 @@ export function useMemoryCRUD({
         const source = options?.source;
         const sourceUrl = options?.sourceUrl;
         const placeCategory = normalizePlaceCategory(options?.placeCategory);
-        const placePhotoRefs = normalizePlacePhotoRefs(options?.placePhotoRefs);
         const localMemory: Memory = {
             id: tempId,
             uri: photoUri,
@@ -129,7 +126,6 @@ export function useMemoryCRUD({
             customFolderIds,
             source,
             sourceUrl,
-            placePhotoRefs,
         };
 
         setMemories(prev => [...prev, localMemory]);
@@ -155,7 +151,6 @@ export function useMemoryCRUD({
             source,
             sourceUrl,
             placeCategory,
-            placePhotoRefs,
         });
         if (result) {
             let persistedFolderIds = customFolderIds;
@@ -217,7 +212,6 @@ export function useMemoryCRUD({
                         thumb_uri: result.thumbUrl,
                         customFolderIds: persistedFolderIds,
                         placeCategory,
-                        placePhotoRefs,
                     }
                     : m
             ));

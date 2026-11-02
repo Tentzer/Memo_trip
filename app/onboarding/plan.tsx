@@ -51,9 +51,7 @@ export default function PlanScreen() {
         const photoUri = stop.photoReference
             ? `https://maps.googleapis.com/maps/api/place/photo?maxwidth=1200&photo_reference=${stop.photoReference}&key=${GOOGLE_API_KEY}`
             : PLACEHOLDER_URL;
-        await addPlaceMemory(photoUri, stop.lat, stop.lng, stop.country, stop.name, undefined, {
-            placePhotoRefs: stop.photoReferences,
-        });
+        await addPlaceMemory(photoUri, stop.lat, stop.lng, stop.country, stop.name);
     };
 
     const handleSaveToMemories = async (place: RecommendedPlace): Promise<void> => {
@@ -68,7 +66,6 @@ export default function PlanScreen() {
             place.country,
             place.description || undefined,
             place.name,
-            { placePhotoRefs: place.photoReferences },
         );
     };
 

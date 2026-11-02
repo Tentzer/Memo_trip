@@ -12,8 +12,6 @@ export interface PlanStop {
     durationMinutes: number;
     travelFromPreviousMinutes: number;
     photoReference: string | null;
-    /** Extra Google photo refs. Index 0 matches photoReference. Not fetched until the memo gallery. */
-    photoReferences?: string[];
     openingHours: string | null;
     country: string;
     warnings: string[];
@@ -26,8 +24,6 @@ export interface RecommendedPlace {
     userRatingsTotal: number;
     placeId: string;
     photoReference: string | null;
-    /** Extra Google photo refs. Index 0 matches photoReference. Not fetched until the memo gallery. */
-    photoReferences?: string[];
     lat: number;
     lng: number;
     country: string;

@@ -172,7 +172,6 @@ export default function VideoImportScreen() {
             lat: details.latitude,
             lng: details.longitude,
             photoReference: details.photoReference,
-            photoReferences: details.photoReferences,
             photoUri,
             country: details.country,
         };
@@ -211,7 +210,6 @@ export default function VideoImportScreen() {
                     source: 'video_import',
                     sourceUrl: job.url,
                     placeCategory: normalizePlaceCategory(place.category),
-                    placePhotoRefs: resolved.photoReferences,
                 },
             );
             markSaved(job.id, key);

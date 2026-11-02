@@ -3,7 +3,6 @@ import {
     normalizeLocationFolderName,
     type GoogleAddressComponent,
 } from '@/lib/geocoding';
-import { takePlacePhotoRefs } from '@/lib/placePhotoRefs';
 
 export interface PlacePrediction {
     place_id: string;
@@ -18,8 +17,6 @@ export interface GooglePlaceDetails {
     latitude: number;
     longitude: number;
     photoReference: string | null;
-    /** Up to 5 Google photo_reference values. Index 0 is the pin photo. */
-    photoReferences: string[];
     country: string | null;
     title: string;
 }
@@ -93,13 +90,11 @@ export async function fetchGooglePlaceDetails(
     const longitude = data.result.geometry.location.lng;
     const placeDetailsCountry = getFolderNameFromGoogleAddressComponents(components);
     const country = placeDetailsCountry || await fetchFolderNameFromGoogleCoords(latitude, longitude, googleApiKey);
-    const photoReferences = takePlacePhotoRefs(data.result.photos);
 
     return {
         latitude,
         longitude,
-        photoReference: photoReferences[0] ?? null,
-        photoReferences,
+        photoReference: data.result.photos?.[0]?.photo_reference ?? null,
         country,
         title: description,
     };
