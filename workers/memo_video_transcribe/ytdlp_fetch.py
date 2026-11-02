@@ -36,6 +36,7 @@ def assert_tiktok_url(url: str) -> None:
 
 
 def _get_cookies_file() -> str | None:
+    """TikTok cookies from Modal env only: YDL_COOKIES_FILE or YDL_COOKIES."""
     global _cookies_tmp_path
 
     explicit = os.environ.get("YDL_COOKIES_FILE", "").strip()

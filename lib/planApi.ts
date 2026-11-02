@@ -1,3 +1,4 @@
+import { userMessageFromInvokeError } from '@/lib/paidEndpointError';
 import { supabase } from '@/lib/supabase';
 import type { PlanStop, RecommendationSection, RecommendedPlace } from '@/types/plan';
 import type { PlanAgentHistoryItem } from '@/types/planAgentHistory';
@@ -28,7 +29,7 @@ export async function sendAgentMessage(
         body: { message, userLocation, history: history ?? [] },
     });
 
-    if (error) throw new Error(error.message);
+    if (error) throw new Error(await userMessageFromInvokeError(error, 'plan'));
     if (!data) throw new Error('No response from agent.');
     return data;
 }

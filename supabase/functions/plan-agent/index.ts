@@ -4,11 +4,6 @@ const GOOGLE_API_KEY = Deno.env.get('GOOGLE_MAPS_API_KEY') ?? '';
 const GEMINI_MODEL = Deno.env.get('GEMINI_MODEL') ?? 'gemini-2.5-flash-lite';
 const GEMINI_BASE_URL = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`;
 
-const CORS_HEADERS = {
-    'Access-Control-Allow-Origin': '*',
-    'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
-};
-
 const CORE_RULES = `You are a trip planning engine for a mobile app. Prioritize correct, actionable outputs: structured data for maps, minimal prose, no small talk unless the user is clearly chatting about travel.
 
 SCOPE: You only assist with travel, trip planning, and place recommendations (restaurants, attractions, shopping, accommodation, transportation, itineraries, destinations, local tips, etc.). If the user asks about anything unrelated to travel or places, politely explain that you are a travel planning assistant and can only help with travel-related questions. Do not answer off-topic questions.
@@ -31,6 +26,17 @@ import type { RecommendedPlace } from './plan_agent_types.ts';
 import { readNearMeGeoEnv } from './geo.ts';
 import { createUserSupabase, fetchMemorySnippetBlockForPlaces } from './memory_rag.ts';
 import { searchNearbyPlaces, searchPlaceAutocomplete as searchPlace } from './places_search.ts';
+import { authenticateRequest } from '../_shared/auth_supabase.ts';
+import { CORS_HEADERS, jsonResponse } from '../_shared/http.ts';
+import {
+    dailyLimitMessage,
+    DEFAULT_PLAN_AGENT_DAILY_LIMIT,
+    enforceDailyLimit,
+    PLAN_AGENT_ENDPOINT,
+    readDailyLimit,
+} from '../_shared/rate_limit.ts';
+import { consumeEdgeDailyRequest } from '../_shared/rate_limit_supabase.ts';
+import { parseClassifiedIntent } from './classify.ts';
 
 // ---- Types ----
 
@@ -58,14 +64,6 @@ type PlanAgentHistoryItem =
     };
 
 type StopCategory = 'food' | 'shopping' | 'attraction' | 'other';
-type IntentType = 'chat' | 'recommend' | 'plan' | 'plan_with_recommendations';
-
-interface ClassifiedIntent {
-    intent: IntentType;
-    chatResponse: string | null;
-    searchQuery: string | null;
-    exclude_prior_place_results?: boolean;
-}
 
 interface HybridSegmentRecommend {
     type: 'recommend';
@@ -140,13 +138,6 @@ function formatTime(totalMinutes: number): string {
     const period = h >= 12 ? 'PM' : 'AM';
     const hour12 = h % 12 === 0 ? 12 : h % 12;
     return `${hour12}:${m.toString().padStart(2, '0')} ${period}`;
-}
-
-function jsonResponse(data: unknown, status = 200): Response {
-    return new Response(JSON.stringify(data), {
-        status,
-        headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
-    });
 }
 
 function formatAssistantForModel(item: PlanAgentHistoryItem): string {
@@ -446,6 +437,9 @@ Deno.serve(async (req) => {
     }
 
     try {
+        const authResult = await authenticateRequest(req);
+        if (authResult instanceof Response) return authResult;
+
         const { message, userLocation, history: rawHistory } = (await req.json()) as {
             message: string;
             userLocation: { latitude: number; longitude: number };
@@ -459,6 +453,26 @@ Deno.serve(async (req) => {
                 text: 'Hi! How can I help you plan your day?',
             });
         }
+
+        if (
+            userLocation == null
+            || typeof userLocation.latitude !== 'number'
+            || typeof userLocation.longitude !== 'number'
+        ) {
+            return jsonResponse({ error: 'userLocation is required.' }, 400);
+        }
+
+        const dailyLimit = readDailyLimit(
+            Deno.env.get('PLAN_AGENT_DAILY_LIMIT'),
+            DEFAULT_PLAN_AGENT_DAILY_LIMIT,
+        );
+        const limited = await enforceDailyLimit(consumeEdgeDailyRequest, {
+            userId: authResult.userId,
+            endpoint: PLAN_AGENT_ENDPOINT,
+            limit: dailyLimit,
+            message: dailyLimitMessage(dailyLimit, 'trip plans'),
+        });
+        if (limited) return limited;
 
         const geoConfig = readNearMeGeoEnv();
         const userSb = createUserSupabase(req);
@@ -497,7 +511,11 @@ Return JSON:
 }`;
 
         const classifyResult = await callGemini(classifySystem, message, true, history);
-        const classified: ClassifiedIntent = JSON.parse(classifyResult);
+        const parsedClassify = parseClassifiedIntent(classifyResult);
+        if (parsedClassify.fallback) {
+            console.error('plan-agent classify JSON fallback');
+        }
+        const classified = parsedClassify.intent;
         console.log('Classified intent:', classified.intent);
 
         const excludePrior = classified.exclude_prior_place_results === true;

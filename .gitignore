@@ -43,3 +43,21 @@ app-example
 /android
 
 .env
+
+# Supabase CLI local link metadata
+supabase/.temp/
+
+# Python
+__pycache__/
+*.py[cod]
+
+# Editor / IDE
+.idea/
+*.bak
+
+# Local session cookies and API debug dumps
+cookies.txt
+modal-response*.json
+
+# Deno lock written at the repo root. The lock next to supabase/functions/deno.json is tracked.
+/deno.lock

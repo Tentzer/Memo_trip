@@ -1,4 +1,5 @@
-import { compressLocalImageForUpload } from '@/lib/imageCompress';
+import { compressLocalImageForUpload, createPinThumbnail } from '@/lib/imageCompress';
+import { uploadMemoryJpeg } from '@/lib/memoryBucket';
 import { getCountryNameFromCoords, normalizeLocationFolderName, toFolderLookupKey } from '@/lib/geocoding';
 import {
     getCustomFoldersStorageKey,
@@ -28,6 +29,12 @@ function coalesceImportSource(
     return metaValue === 'video_import' ? 'video_import' : undefined;
 }
 
+function coalesceThumbUri(dbValue: unknown): string | null {
+    if (typeof dbValue !== 'string') return null;
+    const trimmed = dbValue.trim();
+    return trimmed === '' ? null : trimmed;
+}
+
 function coalesceSourceUrl(dbValue: unknown, metaValue: string | undefined): string | undefined {
     if (dbValue != null && String(dbValue).trim() !== '') {
         return String(dbValue).trim();
@@ -40,13 +47,6 @@ function coalescePlaceCategory(
     metaValue: Memory['placeCategory'],
 ): Memory['placeCategory'] {
     return normalizePlaceCategory(dbValue) ?? metaValue;
-}
-
-/** Client read of the optional thumb_uri column. Generation stays server-side. */
-function readThumbUri(value: unknown): string | undefined {
-    if (typeof value !== 'string') return undefined;
-    const trimmed = value.trim();
-    return trimmed ? trimmed : undefined;
 }
 
 /** One-time migration path: push legacy AsyncStorage-only import fields to Postgres for owned rows. */
@@ -319,7 +319,7 @@ export async function buildFormattedMemories(
             return {
                 id: memoryId,
                 uri: item.image_url,
-                thumb_uri: readThumbUri(item.thumb_uri),
+                thumb_uri: coalesceThumbUri(item.thumb_uri),
                 latitude: item.latitude,
                 longitude: item.longitude,
                 created_at: item.created_at ?? new Date().toISOString(),
@@ -355,21 +355,19 @@ export async function uploadPicture(
         sourceUrl?: string;
         placeCategory?: Memory['placeCategory'];
     }
-): Promise<{ persistedId: string; publicUrl: string } | null> {
+): Promise<{ persistedId: string; publicUrl: string; thumbUrl: string | null } | null> {
     try {
         const fileName = `${tempId}.jpg`;
         const uriForUpload = await compressLocalImageForUpload(photoUri);
-        const response = await fetch(uriForUpload);
-        const blob = await response.blob();
-        const arrayBuffer = await new Response(blob).arrayBuffer();
+        const publicUrl = await uploadMemoryJpeg(fileName, uriForUpload);
 
-        const { error: storageError } = await supabase.storage
-            .from('memories')
-            .upload(fileName, arrayBuffer, { contentType: 'image/jpeg' });
-
-        if (storageError) throw storageError;
-
-        const { data: { publicUrl } } = supabase.storage.from('memories').getPublicUrl(fileName);
+        let thumbUrl: string | null = null;
+        try {
+            const thumbLocalUri = await createPinThumbnail(uriForUpload);
+            thumbUrl = await uploadMemoryJpeg(`thumbs/${tempId}.jpg`, thumbLocalUri);
+        } catch (thumbError) {
+            console.error('Pin thumbnail upload failed:', thumbError);
+        }
 
         const titleVal = options?.title?.trim() || null;
         const descVal = options?.description?.trim() || null;
@@ -399,6 +397,7 @@ export async function uploadPicture(
                 place_category: resolvedPlaceCategory,
                 country: normalizeLocationFolderName(country),
                 formatted_address: null,
+                thumb_uri: thumbUrl,
             }])
             .select('id')
             .single();
@@ -423,7 +422,7 @@ export async function uploadPicture(
         await saveMemoryMeta(userId, nextMeta);
 
         console.log('Background Sync Complete.');
-        return { persistedId, publicUrl };
+        return { persistedId, publicUrl, thumbUrl };
     } catch (err) {
         console.error('Cloud sync failed:', err);
         return null;
@@ -437,18 +436,7 @@ export async function uploadLibraryCover(
     try {
         const fileName = `library-covers/${folderId}-${Date.now()}.jpg`;
         const uriForUpload = await compressLocalImageForUpload(imageUri);
-        const response = await fetch(uriForUpload);
-        const blob = await response.blob();
-        const arrayBuffer = await new Response(blob).arrayBuffer();
-
-        const { error: storageError } = await supabase.storage
-            .from('memories')
-            .upload(fileName, arrayBuffer, { contentType: 'image/jpeg' });
-
-        if (storageError) throw storageError;
-
-        const { data: { publicUrl } } = supabase.storage.from('memories').getPublicUrl(fileName);
-
+        const publicUrl = await uploadMemoryJpeg(fileName, uriForUpload);
         return { publicUrl };
     } catch (error) {
         console.error('Library cover upload failed:', error);

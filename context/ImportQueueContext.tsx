@@ -9,6 +9,7 @@ import {
     type DismissedImportSets,
 } from '@/lib/dismissedVideoImports';
 import { fetchGooglePlaceDetails, fetchGooglePlacePredictions } from '@/lib/googlePlaces';
+import { serverErrorFromBody, userMessageForStatus } from '@/lib/paidEndpointError';
 import { consumeDirectImportHandoff } from '@/lib/shareExtensionAuthSync';
 import { supabase } from '@/lib/supabase';
 import type { ModalImportResult, ModalPlace } from '@/types/videoImport';
@@ -557,8 +558,13 @@ export function ImportQueueProvider({ children }: { children: React.ReactNode })
             });
 
             if (!res.ok) {
-                const text = await res.text().catch(() => '');
-                throw new Error(`Failed to queue import: ${text.slice(0, 100)}`);
+                let serverError: string | null = null;
+                try {
+                    serverError = serverErrorFromBody(await res.json());
+                } catch {
+                    serverError = null;
+                }
+                throw new Error(userMessageForStatus(res.status, serverError, 'import'));
             }
 
             const { jobId } = await res.json();
