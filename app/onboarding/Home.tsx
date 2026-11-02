@@ -8,7 +8,7 @@ import SearchBar, { SEARCH_BAR_ROW_HEIGHT_PX } from '@/components/SearchBar';
 import { type SettingsSheetRef } from '@/components/SettingsSheet';
 import { darkMapStyle } from '@/constants/darkMapStyle';
 import { useAuth } from '@/context/AuthContext';
-import { useLibrariesOverlay } from '@/context/LibrariesOverlayContext';
+import { useLibrariesOverlay, useLibrariesOverlayActions } from '@/context/LibrariesOverlayContext';
 import { type Memory, useMemories } from '@/context/MemoryContext';
 import { useAppTheme } from '@/context/ThemeContext';
 import { useClusteredMapMarkers } from '@/hooks/useClusteredMapMarkers';
@@ -28,11 +28,21 @@ const DEFAULT_LATITUDE = 32.0853;
 const DEFAULT_LONGITUDE = 34.7818;
 const INITIAL_LONGITUDE_DELTA = 0.01;
 
+function LibrariesAwareChrome({ children }: { children: React.ReactNode }) {
+    const { visible } = useLibrariesOverlay();
+    return (
+        <View pointerEvents={visible ? 'none' : 'box-none'} style={StyleSheet.absoluteFill}>
+            {children}
+        </View>
+    );
+}
+
 export default function MapScreen() {
     const insets = useSafeAreaInsets();
     const tabBarHeight = useBottomTabBarHeight();
     const router = useRouter();
     const auth = useAuth();
+    const { close: closeLibrariesOverlay } = useLibrariesOverlayActions();
     const { isDarkMode, setIsDarkMode, theme } = useAppTheme();
     const mapChromeTop = insets.top + 16;
     const menuBelowSearchGap = 10;
@@ -57,7 +67,6 @@ export default function MapScreen() {
     } = useMemories();
 
     const settingsSheetRef = useRef<SettingsSheetRef>(null);
-    const { visible: librariesOverlayVisible, close: closeLibrariesOverlay } = useLibrariesOverlay();
     const [marketplaceVisible, setMarketplaceVisible] = useState(false);
     const [invitesVisible, setInvitesVisible] = useState(false);
     const [isMapReady, setIsMapReady] = useState(false);
@@ -261,10 +270,7 @@ export default function MapScreen() {
 
     return (
         <View style={[styles.screen, { backgroundColor: theme.colors.background }]}>
-            <View
-                pointerEvents={librariesOverlayVisible ? 'none' : 'box-none'}
-                style={StyleSheet.absoluteFill}
-            >
+            <LibrariesAwareChrome>
                     <TouchableOpacity
                         onPress={handleOpenSettings}
                         style={[
@@ -294,7 +300,7 @@ export default function MapScreen() {
                         onClear={clearMapLibraryFilter}
                         onApply={applyLibraryFilter}
                     />
-            </View>
+            </LibrariesAwareChrome>
 
             <SearchBar
                 showSearchBar={showSearchBar}
@@ -401,14 +407,13 @@ export default function MapScreen() {
             </View>
 
             <LibraryModal
-                visible={isGalleryVisible || isCountryLibraryVisible || librariesOverlayVisible}
-                enableSwipeToClose={librariesOverlayVisible && !isGalleryVisible && !isCountryLibraryVisible}
+                visible={isGalleryVisible || isCountryLibraryVisible}
+                enableSwipeToClose={!isGalleryVisible && !isCountryLibraryVisible}
                 onClose={() => {
                     setIsGalleryVisible(false);
                     setIsCountryLibraryVisible(false);
-                    closeLibrariesOverlay();
                 }}
-                variant={isCountryLibraryVisible || librariesOverlayVisible ? 'countries' : 'custom'}
+                variant={isCountryLibraryVisible || !isGalleryVisible ? 'countries' : 'custom'}
                 memories={memories}
                 sharedLibraryMemories={sharedLibraryMemories}
                 customFolders={customFolders}

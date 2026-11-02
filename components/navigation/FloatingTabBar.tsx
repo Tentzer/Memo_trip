@@ -7,6 +7,7 @@ import {
 import { BlurView } from 'expo-blur';
 import React, { useContext } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
+import Reanimated, { Extrapolation, interpolate, useAnimatedStyle } from 'react-native-reanimated';
 
 const PILL_GAP_ABOVE_SAFE_AREA = 10;
 const PILL_HEIGHT = 58;
@@ -20,8 +21,17 @@ function isHiddenTab(style: BottomTabBarProps['descriptors'][string]['options'][
 export default function FloatingTabBar({ state, descriptors, navigation, insets }: BottomTabBarProps) {
     const onHeightChange = useContext(BottomTabBarHeightCallbackContext);
     const { theme, isDarkMode } = useAppTheme();
-    const { visible: librariesOverlayVisible } = useLibrariesOverlay();
+    const { visible: librariesOverlayVisible, sheetTranslateY, sheetTravel } = useLibrariesOverlay();
     const routes = state.routes.filter((route) => !isHiddenTab(descriptors[route.key].options.tabBarItemStyle));
+    const barStyle = useAnimatedStyle(() => {
+        const travel = Math.max(sheetTravel.value, 1);
+        return {
+            opacity: interpolate(sheetTranslateY.value, [0, travel], [0, 1], Extrapolation.CLAMP),
+            transform: [{
+                translateY: interpolate(sheetTranslateY.value, [0, travel], [PILL_HEIGHT + 12, 0], Extrapolation.CLAMP),
+            }],
+        };
+    });
 
     return (
         <View
@@ -31,11 +41,10 @@ export default function FloatingTabBar({ state, descriptors, navigation, insets 
                 styles.wrap,
                 {
                     paddingBottom: insets.bottom + PILL_GAP_ABOVE_SAFE_AREA,
-                    opacity: librariesOverlayVisible ? 0 : 1,
                 },
             ]}
         >
-            <View style={[styles.shadow, { shadowColor: theme.colors.shadow }]}>
+            <Reanimated.View style={[styles.shadow, barStyle, { shadowColor: theme.colors.shadow }]}>
                 <BlurView
                     intensity={isDarkMode ? 48 : 72}
                     tint={isDarkMode ? 'dark' : 'light'}
@@ -81,7 +90,7 @@ export default function FloatingTabBar({ state, descriptors, navigation, insets 
                         );
                     })}
                 </BlurView>
-            </View>
+            </Reanimated.View>
         </View>
     );
 }
