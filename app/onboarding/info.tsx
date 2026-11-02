@@ -1,18 +1,17 @@
 import { useAppTheme } from '@/context/ThemeContext';
 import { Ionicons } from '@expo/vector-icons';
+import { useBottomTabBarHeight } from '@react-navigation/bottom-tabs';
 import React from 'react';
 import { ScrollView, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 type FeatureIcon = React.ComponentProps<typeof Ionicons>['name'];
 
-/** Space for tab bar + comfortable scroll padding when tabs are at the bottom. */
-const TAB_BAR_SCROLL_PADDING = 96;
-
 export default function InfoPage() {
     const insets = useSafeAreaInsets();
     const { theme } = useAppTheme();
-    const paddingBottom = insets.bottom + TAB_BAR_SCROLL_PADDING;
+    const tabBarHeight = useBottomTabBarHeight();
+    const paddingBottom = tabBarHeight + 24;
 
     return (
         <ScrollView

@@ -1,4 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
+import { useBottomTabBarHeight } from '@react-navigation/bottom-tabs';
 import React, { useRef, useState } from 'react';
 import {
     ActivityIndicator,
@@ -25,6 +26,7 @@ const PLACEHOLDER_URL = 'https://placehold.co/400x400/e2e8f0/94a3b8.png?text=?';
 export default function PlanScreen() {
     const { user } = useAuth();
     const { theme } = useAppTheme();
+    const tabBarHeight = useBottomTabBarHeight();
     const styles = React.useMemo(() => createStyles(theme.colors), [theme.colors]);
     const [inputText, setInputText] = useState('');
     const { messages, loading, sendMessage, clearMessages } = usePlanAgent();
@@ -121,7 +123,7 @@ export default function PlanScreen() {
                     />
                 )}
 
-                <View style={styles.inputBar}>
+                <View style={[styles.inputBar, { marginBottom: tabBarHeight }]}>
                     {messages.length > 0 && (
                         <TouchableOpacity
                             style={styles.clearButton}

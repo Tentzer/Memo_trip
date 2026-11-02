@@ -11,6 +11,7 @@ import { rtlAwareTextStyle } from '@/lib/textDirection';
 import type { ModalPlace } from '@/types/videoImport';
 import { normalizePlaceCategory } from '@/lib/placeCategory';
 import { Ionicons } from '@expo/vector-icons';
+import { useBottomTabBarHeight } from '@react-navigation/bottom-tabs';
 import { useFocusEffect } from 'expo-router';
 import React, { useCallback, useMemo, useState } from 'react';
 import {
@@ -142,6 +143,7 @@ function ImportBatch({ job, savingKey, saveErrors, onAdd, onAddAll, onRetry, onD
 export default function VideoImportScreen() {
     const { user } = useAuth();
     const { theme } = useAppTheme();
+    const tabBarHeight = useBottomTabBarHeight();
     const styles = useMemo(() => createStyles(theme.colors), [theme.colors]);
     const { jobs, enqueueUrl, retryJob, markSaved, removeJob, clearDoneJobs, refreshJobs } = useImportQueue();
     const { addPlaceMemory, memories } = useMemories();
@@ -261,7 +263,7 @@ export default function VideoImportScreen() {
                 keyboardVerticalOffset={0}
             >
                 {jobs.length === 0 ? (
-                    <View style={styles.emptyState}>
+                    <View style={[styles.emptyState, { paddingBottom: tabBarHeight }]}>
                         <Ionicons name="film-outline" size={52} color={theme.colors.borderStrong} />
                         <Text style={styles.emptyTitle}>Import from a video</Text>
                         <Text style={styles.emptySubtitle}>
@@ -302,7 +304,7 @@ export default function VideoImportScreen() {
                     </ScrollView>
                 )}
 
-                <View style={styles.inputBar}>
+                <View style={[styles.inputBar, { marginBottom: tabBarHeight }]}>
                     <View style={styles.inputWrapper}>
                         <TextInput
                             style={styles.input}

@@ -325,6 +325,7 @@ export default function MapScreen() {
                             Keyboard.dismiss();
                             setIsLibraryFilterVisible(false);
                         }}
+                        mapPadding={{ top: 0, right: 0, bottom: tabBarHeight, left: 0 }}
                         showsUserLocation={true}
                         showsCompass={true}
                         rotateEnabled={true}

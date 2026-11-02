@@ -1,31 +1,25 @@
+import FloatingTabBar from '@/components/navigation/FloatingTabBar';
 import { LibrariesOverlayProvider, useLibrariesOverlay } from '@/context/LibrariesOverlayContext';
 import { useMemories } from '@/context/MemoryContext';
-import { useAppTheme } from '@/context/ThemeContext';
 import { AntDesign, Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
 import { Tabs, useRouter } from 'expo-router';
 
 function OnboardingTabs() {
     const { addMemory } = useMemories();
-    const { theme } = useAppTheme();
     const router = useRouter();
-    const { visible: librariesOverlayVisible, open: openLibrariesOverlay } = useLibrariesOverlay();
+    const { open: openLibrariesOverlay } = useLibrariesOverlay();
 
     return (
         <Tabs
+            tabBar={(props) => <FloatingTabBar {...props} />}
             screenOptions={{
-                tabBarActiveTintColor: theme.colors.accent,
-                tabBarInactiveTintColor: theme.colors.tabInactive,
                 headerShown: false,
                 tabBarStyle: {
                     position: 'absolute',
-                    left: 0,
-                    right: 0,
-                    bottom: 0,
-                    backgroundColor: theme.colors.surface,
-                    borderTopColor: theme.colors.border,
-                    opacity: librariesOverlayVisible ? 0 : 1,
-                    pointerEvents: librariesOverlayVisible ? 'none' : 'auto',
+                    backgroundColor: 'transparent',
+                    borderTopWidth: 0,
+                    elevation: 0,
                 },
             }}
             screenListeners={{

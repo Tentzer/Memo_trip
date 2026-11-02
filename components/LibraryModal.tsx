@@ -22,6 +22,7 @@ import {
 import type { MemoryPlaceCategory } from '@/types/memory';
 import { alertRequireSignIn } from '@/lib/requireSignInAlert';
 import { Ionicons } from '@expo/vector-icons';
+import { useBottomTabBarHeight } from '@react-navigation/bottom-tabs';
 import { Image as ExpoImage } from 'expo-image';
 import React, { startTransition, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
@@ -134,6 +135,7 @@ export default function LibraryModal({
 }: Props) {
     const { user } = useAuth();
     const { theme } = useAppTheme();
+    const tabBarHeight = useBottomTabBarHeight();
     const dismissDragY = useSharedValue(0);
     const styles = useMemo(() => createStyles(theme.colors), [theme.colors]);
     const [selectedFolder, setSelectedFolder] = useState<LibraryFolder | null>(null);
@@ -1362,7 +1364,7 @@ export default function LibraryModal({
                             numColumns={2}
                             key={`folder-grid-${activeVariant}`}
                             keyExtractor={(item) => item.id}
-                            contentContainerStyle={{ padding: 14, paddingBottom: 32 }}
+                            contentContainerStyle={{ padding: 14, paddingBottom: tabBarHeight + 16 }}
                             ListHeaderComponent={
                                 activeVariant === 'custom' && isCreateFolderVisible ? (
                                     <View style={styles.infoCard}>
@@ -1809,7 +1811,7 @@ export default function LibraryModal({
                             initialNumToRender={8}
                             maxToRenderPerBatch={8}
                             windowSize={5}
-                            contentContainerStyle={{ paddingHorizontal: 10, paddingBottom: 24, paddingTop: 0 }}
+                            contentContainerStyle={{ paddingHorizontal: 10, paddingBottom: tabBarHeight + 16, paddingTop: 0 }}
                             ListEmptyComponent={
                                 supportsCategoryFilter && hasActiveCategoryFilters ? (
                                     <View style={styles.emptyFolderCard}>
