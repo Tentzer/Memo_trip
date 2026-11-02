@@ -1,4 +1,4 @@
-import type { MemoryPlaceCategory } from '../../types/memory';
+import type { MemoryPlaceCategory } from '../../types/memory.ts';
 
 const RANK: Record<MemoryPlaceCategory, number> = {
     sushi: 1,

@@ -1,7 +1,7 @@
-import type { MemoryPlaceCategory } from '../../types/memory';
+import type { MemoryPlaceCategory } from '../../types/memory.ts';
 
-import { mapBravePlaceCategory } from './placeCategorySignals';
-import { syntheticBravePlaceId } from './placeId';
+import { mapBravePlaceCategory } from './placeCategorySignals.ts';
+import { syntheticBravePlaceId } from './placeId.ts';
 
 export interface BraveDayHours {
     abbr_name?: string;

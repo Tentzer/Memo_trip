@@ -91,7 +91,8 @@
       "<rootDir>/supabase/"
     ],
     "moduleNameMapper": {
-      "^@/(.*)$": "<rootDir>/$1"
+      "^@/(.*)$": "<rootDir>/$1",
+      "^(\\.{1,2}/.*)\\.ts$": "$1"
     }
   }
 }
