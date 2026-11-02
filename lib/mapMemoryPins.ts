@@ -28,9 +28,14 @@ export type MapMarkerItem =
     | { type: 'pin'; pin: MapMemoryPin }
     | { type: 'cluster'; cluster: MapPinCluster };
 
-/** At this zoom and closer, grouped memories render as individual pins. */
-export const MAX_CLUSTER_ZOOM = 16;
-export const CLUSTER_RADIUS_PX = 56;
+/**
+ * At this zoom and closer, memories stay individual pins.
+ * Zoom 14 is a neighborhood view, so businesses around you are not grouped yet.
+ * Clustering starts at zoom 13 and farther.
+ */
+export const MAX_CLUSTER_ZOOM = 14;
+/** Ground radius, in screen pixels, once clustering is on. About 840 m at zoom 13. */
+export const CLUSTER_RADIUS_PX = 44;
 
 const METERS_PER_PIXEL_AT_EQUATOR_ZOOM_0 = 156543.03392;
 const METERS_PER_LATITUDE_DEGREE = 111_320;

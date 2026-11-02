@@ -7,6 +7,7 @@ export const MARKER_REGION_PADDING = 0.45;
 
 /**
  * Safety cap for custom Google markers. Each one is a native view plus a bitmap.
+ * Applied after clustering, including neighborhood zooms where every pin is individual.
  * A fast zoom that mounts or destroys more than this in one frame crashes iOS.
  */
 export const MAX_MOUNTED_MARKERS = 32;

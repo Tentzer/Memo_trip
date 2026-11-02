@@ -1,6 +1,7 @@
 import { describe, expect, it } from '@jest/globals';
 import {
     CLUSTER_ZOOM_SETTLE_MS,
+    CLUSTER_RADIUS_PX,
     MAX_CLUSTER_ZOOM,
     clusterMapPins,
     clusterRadiusMeters,
@@ -19,6 +20,7 @@ import {
     type MapMarkerItem,
     type MapMemoryPin,
 } from '@/lib/mapMemoryPins';
+import { MAX_MOUNTED_MARKERS, selectVisibleMarkers } from '@/lib/visibleMapMarkers';
 import type { Memory } from '@/types/memory';
 
 const METERS_PER_LATITUDE_DEGREE = 111_320;
@@ -160,7 +162,7 @@ describe('map pin images and coordinates', () => {
 });
 
 describe('map pin clustering', () => {
-    const zoom = 14;
+    const zoom = 13;
     const radius = clusterRadiusMeters(zoom);
     const origin = 32;
     const near = pin('a', origin, 'owned', '2026-01-01T00:00:00.000Z');
@@ -193,6 +195,33 @@ describe('map pin clustering', () => {
         expect(items.map((item) => item.type)).toEqual(['pin', 'pin']);
         expect(zoomBucketFromLongitudeDelta(longitudeDeltaForZoom(MAX_CLUSTER_ZOOM))).toBe(MAX_CLUSTER_ZOOM);
         expect(zoomBucketFromLongitudeDelta(0.01)).toBe(15);
+    });
+
+    it('keeps nearby businesses as separate pins at zoom 14 and 15', () => {
+        const touching = clusterRadiusMeters(13) * 0.4;
+        const here = pin('shop-a', 32, 'owned', '2026-01-01T00:00:00.000Z');
+        const nextDoor = pin('shop-b', northOf(32, touching), 'owned', '2026-02-01T00:00:00.000Z');
+        expect(clusterMapPins([here, nextDoor], 15).map((item) => item.type)).toEqual(['pin', 'pin']);
+        expect(clusterMapPins([here, nextDoor], 14).map((item) => item.type)).toEqual(['pin', 'pin']);
+        expect(clusterMapPins([here, nextDoor], 13).some((item) => item.type === 'cluster')).toBe(true);
+        expect(CLUSTER_RADIUS_PX).toBe(44);
+        expect(clusterRadiusMeters(13)).toBeGreaterThan(800);
+        expect(clusterRadiusMeters(13)).toBeLessThan(900);
+    });
+
+    it('still caps how many individual pins mount when clustering is off', () => {
+        const pins = Array.from({ length: MAX_MOUNTED_MARKERS + 12 }, (_, index) =>
+            pin(`dense-${index}`, 32 + index * 0.0004, 'owned', '2026-01-01T00:00:00.000Z'),
+        );
+        const items = clusterMapPins(pins, 14);
+        expect(items.every((item) => item.type === 'pin')).toBe(true);
+        const visible = selectVisibleMarkers(items, {
+            latitude: 32,
+            longitude: 34,
+            latitudeDelta: 0.2,
+            longitudeDelta: 0.2,
+        });
+        expect(visible).toHaveLength(MAX_MOUNTED_MARKERS);
     });
 
     it('formats the count badge', () => {
