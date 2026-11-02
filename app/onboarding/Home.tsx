@@ -4,6 +4,7 @@ import HomeOverlayModals from '@/components/home/HomeOverlayModals';
 import MapLibraryFilterControl from '@/components/home/MapLibraryFilterControl';
 import { MemoriesMapLoadOverlay } from '@/components/MemoriesMapLoadOverlay';
 import MapMemoryMarkerList from '@/components/map/MapMemoryMarkerList';
+import PinBitmapHost from '@/components/map/PinBitmapHost';
 import SearchBar, { SEARCH_BAR_ROW_HEIGHT_PX } from '@/components/SearchBar';
 import { type SettingsSheetRef } from '@/components/SettingsSheet';
 import { darkMapStyle } from '@/constants/darkMapStyle';
@@ -169,7 +170,7 @@ export default function MapScreen() {
         );
     }, [memories, sharedLibraryMemories, destinationLatitude, destinationLongitude]);
 
-    const { markerItemsToRender, handleRegionChangeComplete, handleClusterPress } = useClusteredMapMarkers({
+    const { markerItemsToRender, handleRegionChange, handleRegionChangeComplete, handleClusterPress } = useClusteredMapMarkers({
         ownedMemories: visibleOwnedMemories,
         sharedMemories: visibleSharedMemories,
         showMemoriesOnMap,
@@ -230,10 +231,21 @@ export default function MapScreen() {
         setUserChoseAddress,
     ]);
 
+    const mapMovedRef = useRef(false);
+    const handlePanDrag = useCallback(() => {
+        if (mapMovedRef.current) return;
+        mapMovedRef.current = true;
+        setMapMoved(true);
+    }, [setMapMoved]);
     const handleRecenter = useCallback(() => {
+        mapMovedRef.current = false;
         void returnToStartingPoint({ forceRefresh: true });
         setMapMoved(false);
     }, [returnToStartingPoint, setMapMoved]);
+    const mapPadding = useMemo(
+        () => ({ top: 0, right: 0, bottom: tabBarHeight, left: 0 }),
+        [tabBarHeight],
+    );
 
     const initialMapCenterDoneRef = useRef(false);
     useEffect(() => {
@@ -326,13 +338,14 @@ export default function MapScreen() {
                             mapCurtainOpacity.value = withTiming(0, { duration: 300 });
                         }}
                         onMapLoaded={() => setIsMapReady(true)}
+                        onRegionChange={handleRegionChange}
                         onRegionChangeComplete={handleRegionChangeComplete}
-                        onPanDrag={() => setMapMoved(true)}
+                        onPanDrag={handlePanDrag}
                         onPress={() => {
                             Keyboard.dismiss();
                             setIsLibraryFilterVisible(false);
                         }}
-                        mapPadding={{ top: 0, right: 0, bottom: tabBarHeight, left: 0 }}
+                        mapPadding={mapPadding}
                         showsUserLocation={true}
                         showsCompass={true}
                         rotateEnabled={true}
@@ -406,6 +419,7 @@ export default function MapScreen() {
                 />
             </View>
 
+            <PinBitmapHost />
             <LibraryModal
                 visible={isGalleryVisible || isCountryLibraryVisible}
                 enableSwipeToClose={!isGalleryVisible && !isCountryLibraryVisible}

@@ -53,6 +53,7 @@ export function useClusteredMapMarkers({
     mapRef,
 }: UseClusteredMapMarkersArgs): {
     markerItemsToRender: MapMarkerItem[];
+    handleRegionChange: () => void;
     handleRegionChangeComplete: (region: Region) => void;
     handleClusterPress: (cluster: MapPinCluster) => void;
 } {
@@ -67,6 +68,7 @@ export function useClusteredMapMarkers({
     const zoomGateRef = useRef(createClusterZoomGate(initialZoom));
     const settleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const settleTokenRef = useRef(0);
+    const gestureActiveRef = useRef(false);
     const clusterIndexRef = useRef<ReturnType<typeof createMapClusterIndex> | null>(null);
     const committedZoomRef = useRef(initialZoom);
     const queryRegionRef = useRef<Region | null>(null);
@@ -162,7 +164,7 @@ export function useClusteredMapMarkers({
         let index = 0;
         let running = 0;
         const pump = () => {
-            if (cancelled) return;
+            if (cancelled || gestureActiveRef.current) return;
             while (running < 2 && index < uris.length) {
                 const uri = uris[index];
                 index += 1;
@@ -173,7 +175,7 @@ export function useClusteredMapMarkers({
                 });
             }
         };
-        pump();
+        if (!gestureActiveRef.current) pump();
         return () => {
             cancelled = true;
         };
@@ -181,7 +183,12 @@ export function useClusteredMapMarkers({
 
     const markerItemsToRender = mountedItems;
 
+    const handleRegionChange = useCallback(() => {
+        gestureActiveRef.current = true;
+    }, []);
+
     const handleRegionChangeComplete = useCallback((region: Region) => {
+        gestureActiveRef.current = false;
         mapRegionRef.current = region;
         const nowMs = Date.now();
         const gate = noteClusterZoomSample(zoomGateRef.current, region.longitudeDelta, nowMs);
@@ -232,5 +239,5 @@ export function useClusteredMapMarkers({
         }, 500);
     }, [mapRef]);
 
-    return { markerItemsToRender, handleRegionChangeComplete, handleClusterPress };
+    return { markerItemsToRender, handleRegionChange, handleRegionChangeComplete, handleClusterPress };
 }
