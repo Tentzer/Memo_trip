@@ -1,13 +1,18 @@
 import { describe, expect, it } from '@jest/globals';
 import {
+    CLUSTER_ZOOM_SETTLE_MS,
     MAX_CLUSTER_ZOOM,
     clusterMapPins,
     clusterRadiusMeters,
+    commitSettledClusterZoom,
+    createClusterZoomGate,
     filterOwnedMapMemories,
     filterSharedMapMemories,
     formatClusterCount,
     isValidMapCoordinate,
     longitudeDeltaForZoom,
+    nextCommittedClusterZoom,
+    noteClusterZoomSample,
     pinImageUri,
     toMapMemoryPins,
     zoomBucketFromLongitudeDelta,
@@ -193,5 +198,54 @@ describe('map pin clustering', () => {
     it('formats the count badge', () => {
         expect(formatClusterCount(2)).toBe('2');
         expect(formatClusterCount(100)).toBe('99+');
+    });
+
+    it('keeps the anchor id when a farther memory joins the cluster', () => {
+        const radius = clusterRadiusMeters(zoom);
+        const anchor = pin('a', origin, 'owned', '2026-01-01T00:00:00.000Z');
+        const neighbor = pin('b', northOf(origin, radius * 0.4), 'shared', '2026-04-01T00:00:00.000Z');
+        const farther = pin('c', northOf(origin, radius * 3.2), 'owned', '2026-02-01T00:00:00.000Z');
+        const tight = clusterMapPins([farther, neighbor, anchor], zoom);
+        const wide = clusterMapPins([neighbor, farther, anchor], zoom - 2);
+        const tightCluster = tight.find((item) => item.type === 'cluster');
+        const wideCluster = wide.find((item) => item.type === 'cluster');
+        if (tightCluster?.type !== 'cluster' || wideCluster?.type !== 'cluster') {
+            throw new Error('expected clusters');
+        }
+        expect(tightCluster.cluster.id).toBe('cluster:a');
+        expect(wideCluster.cluster.id).toBe('cluster:a');
+        expect(tightCluster.cluster.count).toBe(2);
+        expect(wideCluster.cluster.count).toBe(3);
+        expect(tight.filter((item) => item.type === 'pin')).toHaveLength(1);
+    });
+});
+
+describe('cluster zoom settling', () => {
+    it('commits only the last zoom after a burst settles', () => {
+        const samples = [15.2, 14.1, 11.4, 8.2];
+        let gate = createClusterZoomGate(16);
+        samples.forEach((sample, index) => {
+            gate = noteClusterZoomSample(gate, longitudeDeltaForZoom(sample), index * 40);
+            const tooEarly = commitSettledClusterZoom(gate, index * 40 + CLUSTER_ZOOM_SETTLE_MS - 1);
+            expect(tooEarly.committedZoom).toBe(16);
+        });
+        const settled = commitSettledClusterZoom(gate, (samples.length - 1) * 40 + CLUSTER_ZOOM_SETTLE_MS);
+        expect(settled.committedZoom).toBe(8);
+        expect(settled.pendingZoom).toBeNull();
+    });
+
+    it('drops a pending zoom when the camera returns to the committed bucket', () => {
+        let gate = noteClusterZoomSample(createClusterZoomGate(16), longitudeDeltaForZoom(12.2), 0);
+        expect(gate.pendingZoom).toBe(12);
+        gate = noteClusterZoomSample(gate, longitudeDeltaForZoom(16), 50);
+        expect(gate.pendingZoom).toBeNull();
+        expect(commitSettledClusterZoom(gate, 50 + CLUSTER_ZOOM_SETTLE_MS).committedZoom).toBe(16);
+    });
+
+    it('keeps the current bucket when zoom only crosses the rounding boundary', () => {
+        expect(nextCommittedClusterZoom(16, longitudeDeltaForZoom(15.46))).toBe(16);
+        expect(nextCommittedClusterZoom(16, longitudeDeltaForZoom(15.2))).toBe(15);
+        expect(nextCommittedClusterZoom(15, longitudeDeltaForZoom(15.54))).toBe(15);
+        expect(nextCommittedClusterZoom(16, longitudeDeltaForZoom(8))).toBe(8);
     });
 });

@@ -65,6 +65,56 @@ export function zoomBucketFromLongitudeDelta(longitudeDelta: number): number {
     return Math.round(zoomFromLongitudeDelta(longitudeDelta));
 }
 
+/**
+ * Camera-idle callbacks arrive in a burst while a pinch decelerates.
+ * Wait until that burst stops before swapping the marker tree.
+ */
+export const CLUSTER_ZOOM_SETTLE_MS = 200;
+
+/** Stay on the current bucket when zoom only jitters across a rounding boundary. */
+export const CLUSTER_ZOOM_BUCKET_MARGIN = 0.12;
+
+export type ClusterZoomGate = {
+    committedZoom: number;
+    pendingZoom: number | null;
+    pendingAtMs: number | null;
+};
+
+export function createClusterZoomGate(committedZoom: number): ClusterZoomGate {
+    return { committedZoom, pendingZoom: null, pendingAtMs: null };
+}
+
+export function nextCommittedClusterZoom(committedZoom: number, longitudeDelta: number): number {
+    const zoom = zoomFromLongitudeDelta(longitudeDelta);
+    if (!Number.isFinite(zoom)) return committedZoom;
+    const next = Math.round(zoom);
+    if (next === committedZoom) return committedZoom;
+    if (Math.abs(next - committedZoom) === 1) {
+        const midpoint = (committedZoom + next) / 2;
+        if (Math.abs(zoom - midpoint) < CLUSTER_ZOOM_BUCKET_MARGIN) return committedZoom;
+    }
+    return next;
+}
+
+/** Record one camera sample. Intermediate buckets stay pending until the burst settles. */
+export function noteClusterZoomSample(
+    gate: ClusterZoomGate,
+    longitudeDelta: number,
+    nowMs: number,
+): ClusterZoomGate {
+    const pendingZoom = nextCommittedClusterZoom(gate.committedZoom, longitudeDelta);
+    if (pendingZoom === gate.committedZoom) {
+        return { committedZoom: gate.committedZoom, pendingZoom: null, pendingAtMs: null };
+    }
+    return { committedZoom: gate.committedZoom, pendingZoom, pendingAtMs: nowMs };
+}
+
+export function commitSettledClusterZoom(gate: ClusterZoomGate, nowMs: number): ClusterZoomGate {
+    if (gate.pendingZoom == null || gate.pendingAtMs == null) return gate;
+    if (nowMs - gate.pendingAtMs < CLUSTER_ZOOM_SETTLE_MS) return gate;
+    return { committedZoom: gate.pendingZoom, pendingZoom: null, pendingAtMs: null };
+}
+
 export function longitudeDeltaForZoom(zoom: number): number {
     return 360 / 2 ** zoom;
 }
@@ -199,7 +249,8 @@ function buildCluster(members: MapMemoryPin[]): MapPinCluster {
     }
     const count = ordered.length;
     return {
-        id: `cluster:${ordered.map((member) => member.memory.id).join(':')}`,
+        // Lowest member id is the greedy seed, so the marker survives as the group grows.
+        id: `cluster:${ordered[0].memory.id}`,
         latitude: latitude / count,
         longitude: longitude / count,
         count,

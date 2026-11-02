@@ -178,9 +178,15 @@ export const MapMemoryMarker = React.memo(MapMemoryMarkerComponent, sameMemoryMa
 
 function MapClusterMarkerComponent({ cluster, onPress }: MapClusterMarkerProps) {
     const imageUri = pinImageUri(cluster.newest.memory);
-    const snapshot = useMarkerImageSnapshot(imageUri);
     const mixed = cluster.hasOwned && cluster.hasShared;
     const frame: PinFrame = !mixed && cluster.hasShared ? 'shared' : 'owned';
+    const ring: PinRing = mixed ? 'mixed' : frame;
+    // Snapshot once when the photo is ready. Tracking through the decode freezes the map.
+    const snapshot = useMarkerImageSnapshot(
+        imageUri,
+        `${imageUri}|${cluster.count}|${frame}|${ring}|${cluster.newest.variant}`,
+        false,
+    );
     const label = mixed
         ? `${cluster.count} memos, yours and shared`
         : cluster.hasShared
@@ -207,7 +213,7 @@ function MapClusterMarkerComponent({ cluster, onPress }: MapClusterMarkerProps) 
                 onLoad={snapshot.onLoad}
                 onError={snapshot.onError}
                 frame={frame}
-                ring={mixed ? 'mixed' : frame}
+                ring={ring}
                 stem={stemColor(cluster.newest.variant, false)}
                 badge={formatClusterCount(cluster.count)}
             />

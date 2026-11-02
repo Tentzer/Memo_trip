@@ -1,8 +1,12 @@
 import { latitudeForMarkerViewportCenter } from '@/lib/mapCamera';
 import {
+    CLUSTER_ZOOM_SETTLE_MS,
     MAX_CLUSTER_ZOOM,
     clusterMapPins,
+    commitSettledClusterZoom,
+    createClusterZoomGate,
     longitudeDeltaForZoom,
+    noteClusterZoomSample,
     toMapMemoryPins,
     zoomBucketFromLongitudeDelta,
     type MapMarkerItem,
@@ -10,7 +14,7 @@ import {
 } from '@/lib/mapMemoryPins';
 import { useMapMarkerReveal } from '@/hooks/useMapMarkerReveal';
 import type { Memory } from '@/types/memory';
-import { useCallback, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type MapView from 'react-native-maps';
 import type { Region } from 'react-native-maps';
 
@@ -51,7 +55,18 @@ export function useClusteredMapMarkers({
         latitudeDelta: INITIAL_LONGITUDE_DELTA,
         longitudeDelta: INITIAL_LONGITUDE_DELTA,
     });
-    const [clusterZoom, setClusterZoom] = useState(() => zoomBucketFromLongitudeDelta(INITIAL_LONGITUDE_DELTA));
+    const initialZoom = zoomBucketFromLongitudeDelta(INITIAL_LONGITUDE_DELTA);
+    const [clusterZoom, setClusterZoom] = useState(initialZoom);
+    const zoomGateRef = useRef(createClusterZoomGate(initialZoom));
+    const settleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+    const clearSettleTimer = useCallback(() => {
+        if (settleTimerRef.current == null) return;
+        clearTimeout(settleTimerRef.current);
+        settleTimerRef.current = null;
+    }, []);
+
+    useEffect(() => clearSettleTimer, [clearSettleTimer]);
 
     const mapMemoryPins = useMemo(
         () => toMapMemoryPins(ownedMemories, sharedMemories),
@@ -76,9 +91,22 @@ export function useClusteredMapMarkers({
 
     const handleRegionChangeComplete = useCallback((region: Region) => {
         mapRegionRef.current = region;
-        const nextZoom = zoomBucketFromLongitudeDelta(region.longitudeDelta);
-        setClusterZoom((current) => (current === nextZoom ? current : nextZoom));
-    }, []);
+        const nowMs = Date.now();
+        const gate = noteClusterZoomSample(zoomGateRef.current, region.longitudeDelta, nowMs);
+        zoomGateRef.current = gate;
+        clearSettleTimer();
+        if (gate.pendingZoom == null || gate.pendingAtMs == null) return;
+
+        const pendingAtMs = gate.pendingAtMs;
+        settleTimerRef.current = setTimeout(() => {
+            settleTimerRef.current = null;
+            const current = zoomGateRef.current;
+            if (current.pendingAtMs !== pendingAtMs) return;
+            const settled = commitSettledClusterZoom(current, pendingAtMs + CLUSTER_ZOOM_SETTLE_MS);
+            zoomGateRef.current = settled;
+            setClusterZoom((zoom) => (zoom === settled.committedZoom ? zoom : settled.committedZoom));
+        }, CLUSTER_ZOOM_SETTLE_MS);
+    }, [clearSettleTimer]);
 
     const handleClusterPress = useCallback((cluster: MapPinCluster) => {
         const coordinates = cluster.members.map((member) => ({
