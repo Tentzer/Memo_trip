@@ -201,7 +201,33 @@ export default function MemoInfoModal({
                 <Pressable style={styles.backdropTap} onPress={handleClose} accessibilityRole="button" accessibilityLabel="Close" />
                 <View style={[styles.sheet, keyboardHeight > 0 && { marginBottom: keyboardHeight }]}>
                     <View style={styles.handleBar} />
-                    <Text style={styles.heading}>Memo details</Text>
+                    <View style={styles.headerRow}>
+                        <Text style={styles.heading}>Memo details</Text>
+                        <View style={styles.headerActions}>
+                            <TouchableOpacity
+                                onPress={handleClose}
+                                style={styles.headerClose}
+                                accessibilityRole="button"
+                                accessibilityLabel="Close"
+                            >
+                                <Text style={styles.closeButtonText}>Close</Text>
+                            </TouchableOpacity>
+                            {!memory?.isShared && onDelete ? (
+                                <TouchableOpacity
+                                    onPress={() => {
+                                        Keyboard.dismiss();
+                                        onDelete();
+                                    }}
+                                    style={styles.headerDelete}
+                                    accessibilityRole="button"
+                                    accessibilityLabel="Delete"
+                                >
+                                    <Ionicons name="trash-outline" size={14} color={theme.colors.danger} />
+                                    <Text style={styles.deleteButtonText}>Delete</Text>
+                                </TouchableOpacity>
+                            ) : null}
+                        </View>
+                    </View>
 
                     <ScrollView
                         ref={scrollRef}
@@ -288,20 +314,6 @@ export default function MemoInfoModal({
                                             <Text style={styles.routeButtonText}>Share</Text>
                                         </TouchableOpacity>
                                     ) : null}
-                                    {!memory.isShared && onDelete ? (
-                                        <TouchableOpacity
-                                            onPress={() => {
-                                                Keyboard.dismiss();
-                                                onDelete();
-                                            }}
-                                            style={styles.deleteButton}
-                                            accessibilityRole="button"
-                                            accessibilityLabel="Delete"
-                                        >
-                                            <Ionicons name="trash-outline" size={15} color={theme.colors.danger} />
-                                            <Text style={styles.deleteButtonText}>Delete</Text>
-                                        </TouchableOpacity>
-                                    ) : null}
                                     {memory.source === 'video_import' && !!memory.sourceUrl && !!sourcePlatform && (
                                         <TouchableOpacity onPress={handleOpenSourceUrl} activeOpacity={0.8}>
                                             {sourcePlatform === 'instagram' ? (
@@ -381,13 +393,6 @@ export default function MemoInfoModal({
                                 <Text className="text-white font-bold text-base">Save</Text>
                             </TouchableOpacity>
                         ) : null}
-
-                        <TouchableOpacity
-                            onPress={handleClose}
-                            style={[styles.closeButton, editable ? styles.closeButtonEditable : styles.closeButtonReadOnly]}
-                        >
-                            <Text style={styles.closeButtonText}>Close</Text>
-                        </TouchableOpacity>
                     </ScrollView>
                 </View>
             </View>
@@ -423,11 +428,40 @@ const createStyles = (colors: ThemeColors) => StyleSheet.create({
         backgroundColor: colors.handle,
         marginBottom: 12,
     },
+    headerRow: {
+        flexDirection: 'row',
+        alignItems: 'flex-start',
+        justifyContent: 'space-between',
+        gap: 12,
+        marginBottom: 12,
+    },
+    headerActions: {
+        alignItems: 'flex-end',
+        gap: 8,
+    },
     heading: {
+        flex: 1,
         fontSize: 20,
         fontWeight: '700',
         color: colors.text,
-        marginBottom: 12,
+    },
+    headerClose: {
+        paddingHorizontal: 12,
+        paddingVertical: 6,
+        borderRadius: 12,
+        backgroundColor: colors.surfaceMuted,
+    },
+    headerDelete: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: 4,
+        paddingHorizontal: 10,
+        paddingVertical: 5,
+        borderRadius: 999,
+        backgroundColor: colors.dangerSoft,
+        borderWidth: 1,
+        borderColor: colors.danger,
     },
     scroll: {
         maxHeight: 520,
@@ -510,18 +544,6 @@ const createStyles = (colors: ThemeColors) => StyleSheet.create({
         fontWeight: '700',
         color: colors.text,
     },
-    deleteButton: {
-        borderRadius: 999,
-        backgroundColor: colors.dangerSoft,
-        borderWidth: 1,
-        borderColor: colors.danger,
-        flexDirection: 'row',
-        alignItems: 'center',
-        justifyContent: 'center',
-        gap: 6,
-        paddingHorizontal: 12,
-        paddingVertical: 7,
-    },
     deleteButtonText: {
         fontSize: 13,
         fontWeight: '700',
@@ -550,18 +572,6 @@ const createStyles = (colors: ThemeColors) => StyleSheet.create({
         color: colors.text,
         backgroundColor: colors.input,
         fontSize: 16,
-    },
-    closeButton: {
-        padding: 12,
-        borderRadius: 12,
-        alignItems: 'center',
-        backgroundColor: colors.surfaceMuted,
-    },
-    closeButtonEditable: {
-        marginTop: 12,
-    },
-    closeButtonReadOnly: {
-        marginTop: 16,
     },
     closeButtonText: {
         color: colors.textSecondary,
