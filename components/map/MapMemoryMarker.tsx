@@ -156,7 +156,7 @@ function PinBody({
             ) : null}
             {showCategoryBadge && category ? (
                 <View style={markerStyles.categoryBadge}>
-                    <PlaceCategoryIcon category={category} size={11} color="#374151" />
+                    <PlaceCategoryIcon category={category} size={15} color="#374151" />
                 </View>
             ) : null}
         </View>

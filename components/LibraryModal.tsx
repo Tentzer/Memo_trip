@@ -1893,7 +1893,7 @@ export default function LibraryModal({
                                                             <View style={styles.memoCategoryBadge}>
                                                                 <PlaceCategoryIcon
                                                                     category={item.placeCategory}
-                                                                    size={10}
+                                                                    size={14}
                                                                     color="#374151"
                                                                 />
                                                             </View>
@@ -2639,9 +2639,9 @@ const createStyles = (colors: ThemeColors) => StyleSheet.create({
         gap: 4,
     },
     memoCategoryBadge: {
-        width: 16,
-        height: 16,
-        borderRadius: 8,
+        width: 22,
+        height: 22,
+        borderRadius: 11,
         backgroundColor: 'rgba(15, 23, 42, 0.08)',
         alignItems: 'center',
         justifyContent: 'center',
