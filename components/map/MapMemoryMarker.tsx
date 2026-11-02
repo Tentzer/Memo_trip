@@ -8,7 +8,7 @@ import {
 import { PlaceCategoryIcon } from '@/components/PlaceCategoryIcon';
 import { useMarkerImageSnapshot, type MarkerImagePhase } from '@/components/map/useMarkerImageSnapshot';
 import { useAppTheme } from '@/context/ThemeContext';
-import { categoryBadgeForMapMarker } from '@/lib/markerCategoryBadge';
+import { categoryBadgeForMapMarker, pinPlaceholderAppearance } from '@/lib/markerCategoryBadge';
 import { ensureMarkerIconFonts } from '@/lib/markerIconFonts';
 import { formatClusterCount, pinImageUri, type MapPinCluster } from '@/lib/mapMemoryPins';
 import type { Memory, MemoryPlaceCategory } from '@/types/memory';
@@ -50,6 +50,7 @@ function PinBody({
     stem,
     badge,
     category,
+    showCategoryBadge = false,
 }: {
     imageUri: string;
     phase: MarkerImagePhase;
@@ -60,16 +61,28 @@ function PinBody({
     stem: string;
     badge?: string;
     category?: MemoryPlaceCategory | null;
+    showCategoryBadge?: boolean;
 }) {
     const { theme } = useAppTheme();
     const sharedFrame = frame === 'shared';
     const accent = ring === 'shared' ? SHARED_PIN_COLOR : OWNED_PIN_COLOR;
     const showPhoto = imageUri.length > 0 && phase !== 'error';
+    const placeholder = pinPlaceholderAppearance(category);
     const face = (
         <View style={markerStyles.markerAvatarImage}>
             {phase !== 'loaded' ? (
-                <View style={[StyleSheet.absoluteFill, markerStyles.markerPlaceholder]}>
-                    <Ionicons name="image-outline" size={22} color="#94a3b8" />
+                <View
+                    style={[
+                        StyleSheet.absoluteFill,
+                        markerStyles.markerPlaceholder,
+                        { backgroundColor: placeholder.background },
+                    ]}
+                >
+                    {category ? (
+                        <PlaceCategoryIcon category={category} size={26} color={placeholder.icon} />
+                    ) : (
+                        <Ionicons name="image-outline" size={26} color={placeholder.icon} />
+                    )}
                 </View>
             ) : null}
             {showPhoto ? (
@@ -136,7 +149,7 @@ function PinBody({
                     <Text allowFontScaling={false} style={markerStyles.countBadgeText}>{badge}</Text>
                 </View>
             ) : null}
-            {category ? (
+            {showCategoryBadge && category ? (
                 <View style={markerStyles.categoryBadge}>
                     <PlaceCategoryIcon category={category} size={11} color="#374151" />
                 </View>
@@ -178,6 +191,7 @@ function MapMemoryMarkerComponent({ memory, variant, onMarkerPress }: MapMemoryM
                 ring={videoImport ? 'video' : variant}
                 stem={stemColor(variant, videoImport)}
                 category={category}
+                showCategoryBadge
             />
         </Marker>
     );
@@ -235,6 +249,7 @@ function MapClusterMarkerComponent({ cluster, onPress }: MapClusterMarkerProps) 
                 ring={ring}
                 stem={stemColor(cluster.newest.variant, false)}
                 badge={formatClusterCount(cluster.count)}
+                category={cluster.newest.memory.placeCategory ?? null}
             />
         </Marker>
     );
@@ -251,7 +266,8 @@ function sameCluster(prev: MapClusterMarkerProps, next: MapClusterMarkerProps): 
         && prev.cluster.newest.variant === next.cluster.newest.variant
         && prev.cluster.newest.memory.id === next.cluster.newest.memory.id
         && prev.cluster.newest.memory.uri === next.cluster.newest.memory.uri
-        && prev.cluster.newest.memory.thumb_uri === next.cluster.newest.memory.thumb_uri;
+        && prev.cluster.newest.memory.thumb_uri === next.cluster.newest.memory.thumb_uri
+        && prev.cluster.newest.memory.placeCategory === next.cluster.newest.memory.placeCategory;
 }
 
 export const MapClusterMarker = React.memo(MapClusterMarkerComponent, sameCluster);

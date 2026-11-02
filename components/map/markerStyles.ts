@@ -58,7 +58,6 @@ export const markerStyles = StyleSheet.create({
         height: 58,
     },
     markerPlaceholder: {
-        backgroundColor: '#e2e8f0',
         alignItems: 'center',
         justifyContent: 'center',
     },
