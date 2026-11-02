@@ -261,8 +261,10 @@ export default function MapScreen() {
 
     return (
         <View style={[styles.screen, { backgroundColor: theme.colors.background }]}>
-            {!librariesOverlayVisible ? (
-                <>
+            <View
+                pointerEvents={librariesOverlayVisible ? 'none' : 'box-none'}
+                style={StyleSheet.absoluteFill}
+            >
                     <TouchableOpacity
                         onPress={handleOpenSettings}
                         style={[
@@ -292,8 +294,7 @@ export default function MapScreen() {
                         onClear={clearMapLibraryFilter}
                         onApply={applyLibraryFilter}
                     />
-                </>
-            ) : null}
+            </View>
 
             <SearchBar
                 showSearchBar={showSearchBar}

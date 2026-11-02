@@ -45,13 +45,51 @@ import {
 } from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import Reanimated, {
+    Extrapolation,
+    interpolate,
     runOnJS,
     useAnimatedStyle,
     useSharedValue,
-    withTiming,
+    withSpring,
 } from 'react-native-reanimated';
 const LIBRARY_DISMISS_DRAG_THRESHOLD = 120;
 const LIBRARY_DISMISS_VELOCITY = 900;
+const LIBRARY_SHEET_SPRING = { damping: 28, stiffness: 300, mass: 1 };
+
+function LibrarySheetSkeleton() {
+    return (
+        <View style={librarySkeletonStyles.wrap}>
+            <View style={librarySkeletonStyles.handle} />
+            <View style={librarySkeletonStyles.title} />
+            <View style={librarySkeletonStyles.grid}>
+                <View style={librarySkeletonStyles.card} />
+                <View style={librarySkeletonStyles.card} />
+                <View style={librarySkeletonStyles.card} />
+                <View style={librarySkeletonStyles.card} />
+            </View>
+        </View>
+    );
+}
+
+const librarySkeletonStyles = StyleSheet.create({
+    wrap: { flex: 1, paddingHorizontal: 20, paddingTop: 16, gap: 16 },
+    handle: {
+        alignSelf: 'center',
+        width: 44,
+        height: 5,
+        borderRadius: 999,
+        backgroundColor: '#CBD5E1',
+    },
+    title: {
+        alignSelf: 'center',
+        width: 140,
+        height: 16,
+        borderRadius: 8,
+        backgroundColor: '#E2E8F0',
+    },
+    grid: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between', rowGap: 12 },
+    card: { width: '48%', aspectRatio: 1.2, borderRadius: 18, backgroundColor: '#E2E8F0' },
+});
 
 /** `shared-country` is a country folder someone shared with you; its memos live in a library. */
 type LibraryFolderType = 'country' | 'custom' | 'shared-country';
@@ -136,7 +174,6 @@ export default function LibraryModal({
     const { user } = useAuth();
     const { theme } = useAppTheme();
     const tabBarHeight = useBottomTabBarHeight();
-    const dismissDragY = useSharedValue(0);
     const styles = useMemo(() => createStyles(theme.colors), [theme.colors]);
     const [selectedFolder, setSelectedFolder] = useState<LibraryFolder | null>(null);
     const [previousSelectedFolder, setPreviousSelectedFolder] = useState<LibraryFolder | null>(null);
@@ -164,6 +201,17 @@ export default function LibraryModal({
         () => new Set(),
     );
     const { width: windowWidth, height: windowHeight } = useWindowDimensions();
+    const dismissDragY = useSharedValue(windowHeight || 800);
+    const screenHeight = useSharedValue(windowHeight || 800);
+    const [sheetMounted, setSheetMounted] = useState(false);
+    const [usesSheet, setUsesSheet] = useState(false);
+    const [gridReady, setGridReady] = useState(false);
+    if (enableSwipeToClose && !usesSheet) {
+        setUsesSheet(true);
+    }
+    if ((enableSwipeToClose || usesSheet) && visible && !sheetMounted) {
+        setSheetMounted(true);
+    }
     const libraryActionsBarWidth = Math.max(200, windowWidth - 88);
     const folderViewAnimation = useRef(new Animated.Value(1)).current;
     const libraryVariantAnimation = useRef(new Animated.Value(1)).current;
@@ -201,11 +249,22 @@ export default function LibraryModal({
 
     const canDeleteMemory = useCallback((memory: Memory) => !memory.deletedAt && !memory.isShared, []);
 
+    const markGridReady = useCallback(() => {
+        setGridReady(true);
+    }, []);
+
     useEffect(() => {
-        if (!enableSwipeToClose || !visible) return;
-        dismissDragY.value = windowHeight;
-        dismissDragY.value = withTiming(0, { duration: 280 });
-    }, [enableSwipeToClose, visible, dismissDragY, windowHeight]);
+        const height = windowHeight || 800;
+        screenHeight.value = height;
+        if (!visible) dismissDragY.value = height;
+    }, [dismissDragY, screenHeight, visible, windowHeight]);
+
+    useEffect(() => {
+        if (!usesSheet || !visible) return;
+        dismissDragY.value = withSpring(0, LIBRARY_SHEET_SPRING, (finished) => {
+            if (finished) runOnJS(markGridReady)();
+        });
+    }, [dismissDragY, markGridReady, usesSheet, visible]);
 
     useEffect(() => {
         if (!selectedFolder) return;
@@ -268,36 +327,12 @@ export default function LibraryModal({
     );
 
     useEffect(() => {
-        if (visible) {
-            setActiveVariant(variant);
-            setTargetVariant(variant);
-            libraryVariantAnimation.setValue(1);
-            librarySegmentAnimation.setValue(variant === 'countries' ? 0 : 1);
-            return;
-        }
-
-        if (!visible) {
-            setSelectedFolder(null);
-            setPreviousSelectedFolder(null);
-            setIsCreateFolderVisible(false);
-            setIsAddToFolderVisible(false);
-            setIsLibraryActionsVisible(false);
-            setNewFolderName('');
-            setIsShareLibraryVisible(false);
-            setLibraryShareRecipient('');
-            setIsGrantAccessVisible(false);
-            setGrantAccessRecipient('');
-            setAddMemosTab('saved');
-            setLibraryPlaceSearchQuery('');
-            setLibraryPlaceSearchResults([]);
-            setSelectedLibraryPlace(null);
-            setIsSearchingLibraryPlaces(false);
-            setIsAddingLibraryPlace(false);
-            clearMemoSelectionMode();
-            setActiveVariant(variant);
-            setTargetVariant(variant);
-        }
-    }, [librarySegmentAnimation, libraryVariantAnimation, variant, visible, clearMemoSelectionMode]);
+        if (!visible) return;
+        setActiveVariant(variant);
+        setTargetVariant(variant);
+        libraryVariantAnimation.setValue(1);
+        librarySegmentAnimation.setValue(variant === 'countries' ? 0 : 1);
+    }, [librarySegmentAnimation, libraryVariantAnimation, variant, visible]);
 
     // Start the fade-in only after React has committed the new variant's content to the view
     // tree, preventing the old list from briefly appearing at non-zero opacity during the
@@ -676,20 +711,21 @@ export default function LibraryModal({
 
     const finishClose = useCallback(() => {
         Keyboard.dismiss();
+        setSelectedFolder(null);
+        setPreviousSelectedFolder(null);
+        clearMemoSelectionMode();
         onClose();
-    }, [onClose]);
+    }, [clearMemoSelectionMode, onClose]);
 
     const handleClose = useCallback(() => {
-        if (!enableSwipeToClose) {
+        if (!(enableSwipeToClose || usesSheet)) {
             finishClose();
             return;
         }
-        dismissDragY.value = withTiming(windowHeight, { duration: 220 }, (finished) => {
-            if (finished) {
-                runOnJS(finishClose)();
-            }
+        dismissDragY.value = withSpring(screenHeight.value, LIBRARY_SHEET_SPRING, (finished) => {
+            if (finished) runOnJS(finishClose)();
         });
-    }, [dismissDragY, enableSwipeToClose, finishClose, windowHeight]);
+    }, [dismissDragY, enableSwipeToClose, finishClose, screenHeight, usesSheet]);
 
     const dismissPanGesture = useMemo(() => (
         Gesture.Pan()
@@ -703,16 +739,14 @@ export default function LibraryModal({
             })
             .onEnd((event) => {
                 if (event.translationY > LIBRARY_DISMISS_DRAG_THRESHOLD || event.velocityY > LIBRARY_DISMISS_VELOCITY) {
-                    dismissDragY.value = withTiming(windowHeight, { duration: 220 }, (finished) => {
-                        if (finished) {
-                            runOnJS(finishClose)();
-                        }
+                    dismissDragY.value = withSpring(screenHeight.value, LIBRARY_SHEET_SPRING, (finished) => {
+                        if (finished) runOnJS(finishClose)();
                     });
                     return;
                 }
-                dismissDragY.value = withTiming(0, { duration: 180 });
+                dismissDragY.value = withSpring(0, LIBRARY_SHEET_SPRING);
             })
-    ), [dismissDragY, enableSwipeToClose, finishClose, windowHeight]);
+    ), [dismissDragY, enableSwipeToClose, finishClose, screenHeight]);
 
     useEffect(() => {
         if (!enableSwipeToClose || !visible) return;
@@ -725,6 +759,15 @@ export default function LibraryModal({
 
     const dismissAnimatedStyle = useAnimatedStyle(() => ({
         transform: [{ translateY: dismissDragY.value }],
+    }));
+
+    const backdropAnimatedStyle = useAnimatedStyle(() => ({
+        opacity: interpolate(
+            dismissDragY.value,
+            [0, screenHeight.value || 1],
+            [0.4, 0],
+            Extrapolation.CLAMP,
+        ),
     }));
 
     const handleCreateFolder = async () => {
@@ -1874,6 +1917,8 @@ export default function LibraryModal({
                                                         style={{ width: '100%', aspectRatio: 1 }}
                                                         contentFit="cover"
                                                         cachePolicy="memory-disk"
+                                                        recyclingKey={item.id}
+                                                        placeholder={PLACEHOLDER_URL}
                                                     />
                                                     {isMemoSelectionMode && isDeletable ? (
                                                         <View style={[
@@ -1915,20 +1960,25 @@ export default function LibraryModal({
             </SafeAreaView>
     );
 
-    return enableSwipeToClose ? (
-        visible ? (
-            <View style={styles.sheetOverlay} pointerEvents="box-none">
+    if (enableSwipeToClose || usesSheet) {
+        if (!sheetMounted) return null;
+        return (
+            <View style={styles.sheetOverlay} pointerEvents={visible ? 'box-none' : 'none'}>
                 <Reanimated.View
-                    style={[
-                        styles.sheetOverlayPanel,
-                        dismissAnimatedStyle,
-                    ]}
+                    pointerEvents={visible ? 'auto' : 'none'}
+                    style={[styles.sheetBackdrop, backdropAnimatedStyle]}
+                />
+                <Reanimated.View
+                    pointerEvents={visible ? 'auto' : 'none'}
+                    style={[styles.sheetOverlayPanel, dismissAnimatedStyle]}
                 >
-                    {libraryContent}
+                    {gridReady ? libraryContent : <LibrarySheetSkeleton />}
                 </Reanimated.View>
             </View>
-        ) : null
-    ) : (
+        );
+    }
+
+    return (
         <Modal
             animationType="slide"
             transparent={false}
@@ -1979,6 +2029,10 @@ const createStyles = (colors: ThemeColors) => StyleSheet.create({
     sheetOverlay: {
         ...StyleSheet.absoluteFillObject,
         zIndex: 200,
+    },
+    sheetBackdrop: {
+        ...StyleSheet.absoluteFillObject,
+        backgroundColor: '#0F172A',
     },
     sheetOverlayPanel: {
         flex: 1,
