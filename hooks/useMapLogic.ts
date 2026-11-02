@@ -284,7 +284,6 @@ export const useMapLogic = (
 
     const handleMarkerPress = useCallback((memory: Memory) => {
         setUserChoseAddress(false);
-        setMemoryToShare(memory);
         onMarkerActionPress?.(memory);
     }, [onMarkerActionPress]);
 

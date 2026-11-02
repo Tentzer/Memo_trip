@@ -1,6 +1,7 @@
 import { useAppTheme } from '@/context/ThemeContext';
 import { Ionicons } from '@expo/vector-icons';
 import BottomSheet, { BottomSheetBackdrop, BottomSheetView } from '@gorhom/bottom-sheet';
+import { useBottomTabBarHeight } from '@react-navigation/bottom-tabs';
 import React, { forwardRef, useCallback, useImperativeHandle, useMemo, useRef } from 'react';
 import { StyleSheet, Switch, Text, TouchableOpacity, View } from 'react-native';
 
@@ -37,6 +38,7 @@ const SettingsSheet = forwardRef<SettingsSheetRef, Props>(({
     onOpenPlan,
 }, ref) => {
     const { theme } = useAppTheme();
+    const tabBarHeight = useBottomTabBarHeight();
     const bottomSheetRef = useRef<BottomSheet>(null);
     const snapPoints = useMemo(() => ['60%'], []);
     const pendingActionRef = useRef<(() => void) | null>(null);
@@ -67,7 +69,7 @@ const SettingsSheet = forwardRef<SettingsSheetRef, Props>(({
             index={-1}
             snapPoints={snapPoints}
             enablePanDownToClose
-            bottomInset={0}
+            bottomInset={tabBarHeight}
             backdropComponent={renderBackdrop}
             onClose={handleSheetClose}
             animationConfigs={{ duration: 250 }}
@@ -190,7 +192,7 @@ const styles = StyleSheet.create({
     container: {
         paddingHorizontal: 25,
         paddingTop: 8,
-        paddingBottom: 50,
+        paddingBottom: 16,
     },
     header: {
         flexDirection: 'row',
