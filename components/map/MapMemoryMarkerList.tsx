@@ -13,27 +13,23 @@ export default function MapMemoryMarkerList({
     onMarkerPress,
     onClusterPress,
 }: MapMemoryMarkerListProps) {
-    return (
-        <>
-            {items.map((item) => {
-                if (item.type === 'cluster') {
-                    return (
-                        <MapClusterMarker
-                            key={item.cluster.id}
-                            cluster={item.cluster}
-                            onPress={onClusterPress}
-                        />
-                    );
-                }
-                return (
-                    <MapMemoryMarker
-                        key={`${item.pin.variant}:${item.pin.memory.id}`}
-                        memory={item.pin.memory}
-                        variant={item.pin.variant}
-                        onMarkerPress={onMarkerPress}
-                    />
-                );
-            })}
-        </>
-    );
+    return items.map((item) => {
+        if (item.type === 'cluster') {
+            return (
+                <MapClusterMarker
+                    key={item.cluster.id}
+                    cluster={item.cluster}
+                    onPress={onClusterPress}
+                />
+            );
+        }
+        return (
+            <MapMemoryMarker
+                key={`${item.pin.variant}:${item.pin.memory.id}`}
+                memory={item.pin.memory}
+                variant={item.pin.variant}
+                onMarkerPress={onMarkerPress}
+            />
+        );
+    });
 }

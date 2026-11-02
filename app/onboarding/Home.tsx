@@ -338,7 +338,7 @@ export default function MapScreen() {
                             longitudeDelta: INITIAL_LONGITUDE_DELTA,
                         }}
                     >
-                        {userChoseAddress && !isPlaceAlreadySaved && destinationLatitude !== 0 && destinationLongitude !== 0 && (
+                        {userChoseAddress && !isPlaceAlreadySaved && destinationLatitude !== 0 && destinationLongitude !== 0 ? (
                             <Marker
                                 key="destination-pin"
                                 coordinate={{
@@ -350,7 +350,7 @@ export default function MapScreen() {
                                 pinColor="red"
                                 zIndex={1}
                             />
-                        )}
+                        ) : null}
 
                         {/* Custom markers snapshot incorrectly if they mount before the native map is ready. */}
                         {isMapReady ? (
@@ -361,16 +361,16 @@ export default function MapScreen() {
                             />
                         ) : null}
 
-                        {routeCoordinates?.length && showRoute && (
+                        {showRoute && (routeCoordinates?.length ?? 0) > 0 ? (
                             <Polyline
-                                coordinates={routeCoordinates}
+                                coordinates={routeCoordinates ?? []}
                                 strokeColor="#3B82F6"
                                 strokeWidth={4}
                                 lineCap="round"
                                 lineJoin="round"
                                 lineDashPattern={[8, 15]}
                             />
-                        )}
+                        ) : null}
                     </MapView>
                 )}
 
