@@ -1,5 +1,5 @@
 import { usePlacePhotos } from '@/hooks/usePlacePhotos';
-import { galleryView, slideLoadPlan, type GallerySlide } from '@/lib/placePhotoGallery';
+import { galleryView, slideLoadPlan, withoutFailedSlides, type GallerySlide } from '@/lib/placePhotoGallery';
 import type { Memory } from '@/types/memory';
 import { Image as ExpoImage } from 'expo-image';
 import React, { useCallback, useState } from 'react';
@@ -27,16 +27,28 @@ export default function MemoPhotoGallery({ memory }: MemoPhotoGalleryProps) {
     const [pageWidth, setPageWidth] = useState(0);
     const [activeIndex, setActiveIndex] = useState(0);
     const [fullScreen, setFullScreen] = useState(false);
-    const slide = view.slides[activeIndex] ?? view.slides[0];
+    const [failedIds, setFailedIds] = useState<Set<string>>(() => new Set());
+    const slides = withoutFailedSlides(view.slides, failedIds);
+    const safeIndex = slides.length === 0 ? 0 : Math.min(activeIndex, slides.length - 1);
+    const slide = slides[safeIndex];
+
+    const dropSlide = useCallback((id: string) => {
+        setFailedIds((current) => {
+            if (current.has(id)) return current;
+            const next = new Set(current);
+            next.add(id);
+            return next;
+        });
+    }, []);
 
     const onScroll = useCallback((event: NativeSyntheticEvent<NativeScrollEvent>) => {
         if (pageWidth <= 0) return;
         const next = Math.round(event.nativeEvent.contentOffset.x / pageWidth);
-        const clamped = Math.min(view.slides.length - 1, Math.max(0, next));
+        const clamped = Math.min(slides.length - 1, Math.max(0, next));
         setActiveIndex((current) => (current === clamped ? current : clamped));
-    }, [pageWidth, view.slides.length]);
+    }, [pageWidth, slides.length]);
 
-    if (view.slides.length === 0) return null;
+    if (slides.length === 0) return null;
 
     return (
         <View
@@ -46,11 +58,11 @@ export default function MemoPhotoGallery({ memory }: MemoPhotoGalleryProps) {
                 if (width > 0 && width !== pageWidth) setPageWidth(width);
             }}
         >
-            {view.slides.length === 1 || pageWidth === 0 ? (
-                <SlideImage slide={view.slides[0]} plan="full" onPress={() => setFullScreen(true)} />
+            {slides.length === 1 || pageWidth === 0 ? (
+                <SlideImage slide={slides[0]} plan="full" onPress={() => setFullScreen(true)} onError={() => dropSlide(slides[0].id)} />
             ) : (
                 <FlatList
-                    data={view.slides}
+                    data={slides}
                     keyExtractor={(item) => item.id}
                     horizontal
                     pagingEnabled
@@ -69,8 +81,9 @@ export default function MemoPhotoGallery({ memory }: MemoPhotoGalleryProps) {
                         <SlideImage
                             slide={item}
                             width={pageWidth}
-                            plan={slideLoadPlan(index, activeIndex)}
+                            plan={slideLoadPlan(index, safeIndex)}
                             onPress={() => setFullScreen(true)}
+                            onError={() => dropSlide(item.id)}
                         />
                     )}
                 />
@@ -82,10 +95,10 @@ export default function MemoPhotoGallery({ memory }: MemoPhotoGalleryProps) {
             ) : null}
             {view.showDots ? (
                 <View style={styles.dots}>
-                    {view.slides.map((item, index) => (
+                    {slides.map((item, index) => (
                         <View
                             key={item.id}
-                            style={[styles.dot, index === activeIndex ? styles.dotActive : null]}
+                            style={[styles.dot, index === safeIndex ? styles.dotActive : null]}
                         />
                     ))}
                 </View>
@@ -112,11 +125,13 @@ function SlideImage({
     width,
     plan,
     onPress,
+    onError,
 }: {
     slide: GallerySlide;
     width?: number;
     plan: 'hidden' | 'thumb' | 'full';
     onPress: () => void;
+    onError: () => void;
 }) {
     const source = plan === 'full' ? slide.full : slide.thumb;
     return (
@@ -136,6 +151,7 @@ function SlideImage({
                     contentFit="cover"
                     cachePolicy="memory-disk"
                     transition={120}
+                    onError={onError}
                 />
             )}
         </Pressable>

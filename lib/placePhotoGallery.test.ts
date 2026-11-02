@@ -3,6 +3,7 @@ import {
     MAX_PLACE_PHOTOS,
     buildGallerySlides,
     galleryView,
+    withoutFailedSlides,
     type PlacePhoto,
 } from '@/lib/placePhotoGallery';
 
@@ -36,6 +37,33 @@ describe('place photo gallery', () => {
         expect(view.slides.map((slide) => slide.kind)).toEqual(['memory']);
         expect(view.showDots).toBe(false);
         expect(view.loading).toBe(false);
+    });
+
+    it('skips a placeholder memory photo and does not repeat the cover', () => {
+        const placeholder = 'https://placehold.co/400x400/e2e8f0/94a3b8.png?text=?';
+        const cover = { thumb: 'https://imgs.search.brave.com/cover', full: 'https://cdn.example/cover.jpg' };
+        const slides = buildGallerySlides(
+            { uri: placeholder, thumb_uri: placeholder },
+            [cover, place(2), place(3), place(4)],
+        );
+        expect(slides.map((slide) => slide.kind)).toEqual(['place', 'place', 'place', 'place']);
+        expect(slides[0].thumb).toBe(cover.thumb);
+        expect(slides.some((slide) => slide.full.includes('placehold.co'))).toBe(false);
+    });
+
+    it('drops a memory photo that is the same image as the first place photo', () => {
+        const cover = place(1);
+        const slides = buildGallerySlides(
+            { uri: cover.full, thumb_uri: cover.thumb },
+            [cover, place(2)],
+        );
+        expect(slides.map((slide) => slide.full)).toEqual([cover.full, place(2).full]);
+    });
+
+    it('drops a slide after its image fails to load', () => {
+        const slides = buildGallerySlides(memory, [place(1), place(2)]);
+        const visible = withoutFailedSlides(slides, new Set([slides[0].id]));
+        expect(visible.map((slide) => slide.id)).toEqual(slides.slice(1).map((slide) => slide.id));
     });
 
     it('keeps the memory photo alone while loading and after an error', () => {

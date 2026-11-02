@@ -2,7 +2,7 @@ import { getPlacesClient } from '@/lib/places/client';
 import { hintForPrediction } from '@/lib/places/braveProvider';
 import { placePhotoUri } from '@/lib/places/placePhoto';
 import { selectSearchedPlace } from '@/lib/places/selectPlace';
-import { coverUriFromPrediction, PLACEHOLDER_PLACE_PHOTO, resolveSearchCoverUri } from '@/lib/places/saveSearchedPlace';
+import { coverUriFromPrediction, isPlaceholderPhoto, PLACEHOLDER_PLACE_PHOTO, resolveSearchCoverUri } from '@/lib/places/saveSearchedPlace';
 import { resolvePlaceCountry } from '@/lib/googlePlaces';
 import { PLACE_SEARCH_DEBOUNCE_MS } from '@/lib/places/providerName';
 import type { PlacePrediction } from '@/lib/places/types';
@@ -403,8 +403,9 @@ export const useMapLogic = (
 
         const prediction = selectedPredictionRef.current;
         const readyCover = placePhotoUri(selectedPlacePhotoRef, GOOGLE_API_KEY);
-        const photoUri = readyCover
-            ?? (prediction
+        const photoUri = readyCover && !isPlaceholderPhoto(readyCover)
+            ? readyCover
+            : (prediction
                 ? await resolveSearchCoverUri(prediction, (row) => (
                     getPlacesClient().photos(row.place_id, hintForPrediction(row))
                 ))

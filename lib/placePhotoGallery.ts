@@ -33,11 +33,27 @@ function trimmed(value: string | null | undefined): string {
     return value?.trim() ?? '';
 }
 
+function normalizedUrl(value: string): string {
+    return value.trim().toLowerCase();
+}
+
+/** Placeholder and empty covers are not a user photo. */
+export function isUsableMemoryPhoto(uri: string | null | undefined): boolean {
+    const value = trimmed(uri).toLowerCase();
+    if (!value) return false;
+    if (value.includes('placehold.co')) return false;
+    if (value.includes('text=?') || value.includes('text=%3f')) return false;
+    return true;
+}
+
 function memorySlide(memory: MemoryPhoto): GallerySlide | null {
     const full = trimmed(memory.uri);
-    const thumb = trimmed(memory.thumb_uri) || full;
-    if (!thumb) return null;
-    return { id: 'memory', kind: 'memory', thumb, full: full || thumb };
+    const thumb = trimmed(memory.thumb_uri);
+    if (!isUsableMemoryPhoto(full) && !isUsableMemoryPhoto(thumb)) return null;
+    const large = isUsableMemoryPhoto(full) ? full : thumb;
+    const small = isUsableMemoryPhoto(thumb) ? thumb : large;
+    if (!small) return null;
+    return { id: 'memory', kind: 'memory', thumb: small, full: large || small };
 }
 
 function placeSlide(photo: PlacePhoto, index: number): GallerySlide | null {
@@ -49,15 +65,34 @@ function placeSlide(photo: PlacePhoto, index: number): GallerySlide | null {
     return { id: `place-${index}`, kind: 'place', thumb: small, full: large };
 }
 
-/** Memory photo first, then at most five place photos, in the given order. */
+function slideUrls(slide: GallerySlide): string[] {
+    return [normalizedUrl(slide.full), normalizedUrl(slide.thumb)].filter(Boolean);
+}
+
+function dedupeSlides(slides: GallerySlide[]): GallerySlide[] {
+    const seen = new Set<string>();
+    const unique: GallerySlide[] = [];
+    for (const slide of slides) {
+        const urls = slideUrls(slide);
+        if (urls.length === 0 || urls.some((url) => seen.has(url))) continue;
+        urls.forEach((url) => seen.add(url));
+        unique.push(slide);
+    }
+    return unique;
+}
+
+/** Memory photo first when it is a real image, then place photos, without duplicates. */
 export function buildGallerySlides(memory: MemoryPhoto, photos: readonly PlacePhoto[]): GallerySlide[] {
     const first = memorySlide(memory);
-    if (!first) return [];
     const places = photos
         .slice(0, MAX_PLACE_PHOTOS)
         .map(placeSlide)
         .filter((slide): slide is GallerySlide => slide !== null);
-    return [first, ...places];
+    return dedupeSlides(first ? [first, ...places] : places);
+}
+
+export function withoutFailedSlides(slides: readonly GallerySlide[], failedIds: ReadonlySet<string>): GallerySlide[] {
+    return slides.filter((slide) => !failedIds.has(slide.id));
 }
 
 /**

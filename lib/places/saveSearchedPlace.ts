@@ -6,10 +6,24 @@ import { selectSearchedPlace, type SelectedSearchPlace } from './selectPlace';
 
 export const PLACEHOLDER_PLACE_PHOTO = 'https://placehold.co/400x400/e2e8f0/94a3b8.png?text=?';
 
+/** The generated question-mark image, or an empty value, is not a place photo. */
+export function isPlaceholderPhoto(uri: string | null | undefined): boolean {
+    const value = uri?.trim().toLowerCase() ?? '';
+    if (!value) return true;
+    if (value.includes('placehold.co')) return true;
+    if (value.includes('text=?') || value.includes('text=%3f')) return true;
+    return false;
+}
+
 export function coverUriFromPlacePhotos(photos: PlacePhoto[] | null | undefined): string | null {
-    const first = photos?.find((photo) => photo.full?.trim() || photo.thumb?.trim());
-    if (!first) return null;
-    return first.full?.trim() || first.thumb.trim();
+    for (const photo of photos ?? []) {
+        const thumb = photo.thumb?.trim() ?? '';
+        const full = photo.full?.trim() ?? '';
+        const proxied = thumb.includes('imgs.search.brave.com') ? thumb : '';
+        const candidate = proxied || full || thumb;
+        if (candidate && !isPlaceholderPhoto(candidate)) return candidate;
+    }
+    return null;
 }
 
 /** Cover image already attached to a Brave search row, if any. */
@@ -30,10 +44,10 @@ export async function resolveSearchCoverUri(
     if (fetchPhotoUris) {
         try {
             const photos = await fetchPhotoUris(prediction);
-            const first = photos.find((uri) => uri?.trim());
-            if (first) {
-                return placePhotoUri(first, process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY) ?? first.trim();
-            }
+            const first = photos
+                .map((uri) => placePhotoUri(uri, process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY) ?? uri?.trim())
+                .find((uri) => uri && !isPlaceholderPhoto(uri));
+            if (first) return first;
         } catch {
             // Save the place anyway.
         }

@@ -60,9 +60,9 @@ describe('search, select, and save a Brave place', () => {
             addPlaceMemory,
         });
 
-        expect(saved.photoUri).toBe('https://imgs.search.brave.com/cover-full');
+        expect(saved.photoUri).toBe('https://imgs.search.brave.com/cover-thumb');
         expect(addPlaceMemory).toHaveBeenCalledWith(
-            'https://imgs.search.brave.com/cover-full',
+            'https://imgs.search.brave.com/cover-thumb',
             35.665,
             139.77,
             'Japan',
