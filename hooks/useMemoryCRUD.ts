@@ -2,7 +2,7 @@ import { getCountryNameFromCoords, normalizeLocationFolderName } from '@/lib/geo
 import { deleteOwnedMemory } from '@/lib/deleteOwnedMemory';
 import { uploadPicture } from '@/lib/memoryApi';
 import { loadMemoryMeta, saveMemoryMeta } from '@/lib/memoryStorage';
-import { normalizePlaceCategory } from '@/lib/placeCategory';
+import { resolvePlaceCategoryForSave } from '@/lib/placeCategory';
 import { alertRequireSignIn } from '@/lib/requireSignInAlert';
 import { supabase } from '@/lib/supabase';
 import { Memory } from '@/types/memory';
@@ -112,7 +112,11 @@ export function useMemoryCRUD({
         const customFolderIds = options?.customFolderIds ?? [];
         const source = options?.source;
         const sourceUrl = options?.sourceUrl;
-        const placeCategory = normalizePlaceCategory(options?.placeCategory);
+        const storedBefore = await loadMemoryMeta(user.id);
+        const placeCategory = resolvePlaceCategoryForSave(
+            storedBefore[tempId]?.placeCategory,
+            options?.placeCategory,
+        );
         const localMemory: Memory = {
             id: tempId,
             uri: photoUri,
@@ -272,6 +276,7 @@ export function useMemoryCRUD({
                 country: targetMemory.country,
                 title: trimmedTitle || undefined,
                 description: trimmedDescription || undefined,
+                placeCategory: targetMemory.placeCategory,
                 customFolderIds: targetMemory.customFolderIds,
                 excludeFromCountryFolder: targetMemory.excludeFromCountryFolder ?? false,
                 source: targetMemory.source,

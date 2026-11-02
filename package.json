@@ -11,7 +11,7 @@
     "lint": "expo lint",
     "test": "jest",
     "postinstall": "patch-package",
-    "test:plan-agent": "npx --yes deno test --allow-env --config supabase/functions/deno.json ./supabase/functions/plan-agent/ ./supabase/functions/_shared/",
+    "test:plan-agent": "npx --yes deno test --allow-env --unstable-sloppy-imports --config supabase/functions/deno.json ./supabase/functions/plan-agent/ ./supabase/functions/_shared/ ./supabase/functions/places-proxy/",
     "backfill:memory-thumbs": "node scripts/backfill-memory-thumbnails.mjs",
     "backfill:memory-geo": "node scripts/backfill-memory-country-address-once.mjs",
     "purge:soft-deleted-memos": "node scripts/purge-soft-deleted-memos-once.mjs",

@@ -10,11 +10,13 @@ import {
     UNKNOWN_COUNTRY_FOLDER,
 } from '@/lib/countryFolder';
 import {
-    fetchGooglePlaceDetails,
-    fetchGooglePlacePredictions,
     type GooglePlaceDetails,
     type PlacePrediction,
 } from '@/lib/googlePlaces';
+import { getPlacesClient } from '@/lib/places/client';
+import { hintForPrediction } from '@/lib/places/braveProvider';
+import { placePhotoUri } from '@/lib/places/placePhoto';
+import { PLACE_SEARCH_DEBOUNCE_MS } from '@/lib/places/providerName';
 import {
     MEMORY_PLACE_CATEGORIES,
     placeCategoryLabel,
@@ -97,7 +99,7 @@ interface Props {
         country: string,
         description?: string,
         title?: string,
-        options?: { customFolderIds?: string[] }
+        options?: { customFolderIds?: string[]; placeCategory?: MemoryPlaceCategory }
     ) => Promise<void>;
     toggleMemoryInCustomFolder: (memoryId: string, folderId: string) => Promise<void>;
     addMemoriesToCustomFolder: (
@@ -542,7 +544,15 @@ export default function LibraryModal({
     const canShareSelectedFolder = selectedCustomFolder?.role === 'owner';
     const canGrantEditAccess = selectedCustomFolder?.role === 'owner';
 
+    const librarySearchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const librarySearchSeqRef = useRef(0);
+    useEffect(() => () => {
+        if (librarySearchTimerRef.current) clearTimeout(librarySearchTimerRef.current);
+    }, []);
+
     const clearLibraryPlaceSearch = useCallback(() => {
+        if (librarySearchTimerRef.current) clearTimeout(librarySearchTimerRef.current);
+        librarySearchSeqRef.current += 1;
         setLibraryPlaceSearchQuery('');
         setLibraryPlaceSearchResults([]);
         setSelectedLibraryPlace(null);
@@ -594,39 +604,55 @@ export default function LibraryModal({
         libraryVariantAnimation,
     ]);
 
-    const fetchLibraryPlaces = useCallback(async (text: string) => {
+    const fetchLibraryPlaces = useCallback((text: string) => {
         setLibraryPlaceSearchQuery(text);
         setSelectedLibraryPlace(null);
-
-        if (text.length < 3) {
+        if (librarySearchTimerRef.current) clearTimeout(librarySearchTimerRef.current);
+        if (text.trim().length < 3) {
+            librarySearchSeqRef.current += 1;
             setLibraryPlaceSearchResults([]);
+            setIsSearchingLibraryPlaces(false);
             return;
         }
 
+        const seq = ++librarySearchSeqRef.current;
+        setIsSearchingLibraryPlaces(true);
+        librarySearchTimerRef.current = setTimeout(() => {
+            void (async () => {
+                try {
+                    const predictions = await getPlacesClient().search(text);
+                    if (seq !== librarySearchSeqRef.current) return;
+                    setLibraryPlaceSearchResults(predictions);
+                } catch (error) {
+                    console.error('Library place search failed:', error);
+                    if (seq === librarySearchSeqRef.current) {
+                        Alert.alert('Search failed', 'Could not search places right now.');
+                    }
+                } finally {
+                    if (seq === librarySearchSeqRef.current) setIsSearchingLibraryPlaces(false);
+                }
+            })();
+        }, PLACE_SEARCH_DEBOUNCE_MS);
+    }, []);
+
+    const handleSelectLibraryPlace = useCallback(async (prediction: PlacePrediction) => {
         setIsSearchingLibraryPlaces(true);
         try {
-            const predictions = await fetchGooglePlacePredictions(text, GOOGLE_API_KEY);
-            setLibraryPlaceSearchResults(predictions);
-        } catch (error) {
-            console.error('Library place search failed:', error);
-            Alert.alert('Search failed', 'Could not search places right now.');
-        } finally {
-            setIsSearchingLibraryPlaces(false);
-        }
-    }, [GOOGLE_API_KEY]);
-
-    const handleSelectLibraryPlace = useCallback(async (placeId: string, description: string) => {
-        setIsSearchingLibraryPlaces(true);
-        try {
-            const place = await fetchGooglePlaceDetails(placeId, description, GOOGLE_API_KEY);
-
+            const hint = hintForPrediction(prediction);
+            const client = getPlacesClient();
+            const place = await client.details(prediction.place_id, hint);
             if (!place) {
                 Alert.alert('Place not found', 'Could not load this place.');
                 return;
             }
-
-            setSelectedLibraryPlace(place);
-            setLibraryPlaceSearchQuery(description);
+            const photos = await client.photos(prediction.place_id, hint);
+            setSelectedLibraryPlace({
+                ...place,
+                title: place.title || prediction.description,
+                photoReference: photos[0] ?? null,
+                category: place.category ?? prediction.category,
+            });
+            setLibraryPlaceSearchQuery(prediction.description);
             setLibraryPlaceSearchResults([]);
             Keyboard.dismiss();
         } catch (error) {
@@ -635,14 +661,12 @@ export default function LibraryModal({
         } finally {
             setIsSearchingLibraryPlaces(false);
         }
-    }, [GOOGLE_API_KEY]);
+    }, []);
 
     const handleAddSelectedPlaceToLibrary = useCallback(async () => {
         if (!selectedFolder || selectedFolder.type !== 'custom' || !selectedLibraryPlace) return;
 
-        const photoUri = selectedLibraryPlace.photoReference
-            ? `https://maps.googleapis.com/maps/api/place/photo?maxwidth=1200&photo_reference=${selectedLibraryPlace.photoReference}&key=${GOOGLE_API_KEY}`
-            : PLACEHOLDER_URL;
+        const photoUri = placePhotoUri(selectedLibraryPlace.photoReference, GOOGLE_API_KEY) ?? PLACEHOLDER_URL;
 
         setIsAddingLibraryPlace(true);
         try {
@@ -653,7 +677,10 @@ export default function LibraryModal({
                 selectedLibraryPlace.country ?? '',
                 undefined,
                 selectedLibraryPlace.title,
-                { customFolderIds: [selectedFolder.id] }
+                {
+                    customFolderIds: [selectedFolder.id],
+                    placeCategory: selectedLibraryPlace.category,
+                }
             );
             Alert.alert('Place added', `${selectedLibraryPlace.title.split(',')[0].trim()} was added to ${selectedFolder.name}.`);
             clearLibraryPlaceSearch();
@@ -1698,7 +1725,7 @@ export default function LibraryModal({
                                                         {libraryPlaceSearchResults.map((place) => (
                                                             <TouchableOpacity
                                                                 key={place.place_id}
-                                                                onPress={() => handleSelectLibraryPlace(place.place_id, place.description)}
+                                                                onPress={() => handleSelectLibraryPlace(place)}
                                                                 style={styles.libraryPlaceResultItem}
                                                             >
                                                                 <Text style={styles.libraryPlaceResultTitle}>

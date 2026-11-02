@@ -11,4 +11,6 @@ export interface RecommendedPlace {
     lng: number;
     country: string;
     description: string;
+    openingHours?: string | null;
+    placeCategory?: string;
 }

@@ -7,7 +7,7 @@ import {
     loadMemoryMeta,
     saveMemoryMeta,
 } from '@/lib/memoryStorage';
-import { normalizePlaceCategory } from '@/lib/placeCategory';
+import { normalizePlaceCategory, resolvePlaceCategoryForSave } from '@/lib/placeCategory';
 import { supabase } from '@/lib/supabase';
 import { CustomFolder, Memory, MemoryMeta } from '@/types/memory';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -378,10 +378,10 @@ export async function uploadPicture(
             options?.source ?? tempMetaBefore?.source ?? null;
         const resolvedSourceUrl =
             (options?.sourceUrl ?? tempMetaBefore?.sourceUrl)?.trim() || null;
-        const resolvedPlaceCategory =
-            normalizePlaceCategory(options?.placeCategory)
-            ?? normalizePlaceCategory(tempMetaBefore?.placeCategory)
-            ?? null;
+        const resolvedPlaceCategory = resolvePlaceCategoryForSave(
+            tempMetaBefore?.placeCategory,
+            options?.placeCategory,
+        ) ?? null;
 
         const { data: insertedMemory, error: dbError } = await supabase
             .from('memories')

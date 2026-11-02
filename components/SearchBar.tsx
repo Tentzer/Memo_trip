@@ -14,7 +14,7 @@ interface Props {
     searchResults: PlacePrediction[];
     fetchPlaces: (text: string) => void;
     onClearSearch: () => void;
-    handleSelectPlace: (placeId: string, description: string) => void;
+    handleSelectPlace: (place: PlacePrediction) => void;
 }
 
 export default function SearchBar({
@@ -79,7 +79,7 @@ export default function SearchBar({
                         <TouchableOpacity
                             key={item.place_id}
                             style={[styles.resultRow, { borderBottomColor: theme.colors.border }]}
-                            onPress={() => handleSelectPlace(item.place_id, item.description)}
+                            onPress={() => handleSelectPlace(item)}
                         >
                             <Text style={{ color: theme.colors.text }}>{item.description}</Text>
                         </TouchableOpacity>

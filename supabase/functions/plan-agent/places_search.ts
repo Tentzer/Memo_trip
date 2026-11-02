@@ -1,3 +1,5 @@
+import { mapGooglePlaceCategory } from '../../../lib/places/placeCategorySignals.ts';
+import { countryFromCoords, fetchBraveRecommended, placesProvider } from './brave_recommended.ts';
 import { cutoffDistanceFromApiRadius, filterAndRankNearMePlaces, readNearMeGeoEnv } from './geo.ts';
 import { filterPlacesToAnchorLocality } from './locality_filter.ts';
 import { nearMeDiagnostics, NEAR_ME_METRICS } from './near_me_metrics.ts';
@@ -24,6 +26,10 @@ function mapGoogleResultToRecommended(r: Record<string, unknown>): RecommendedPl
         lng,
         country: '',
         description: '',
+        placeCategory: mapGooglePlaceCategory({
+            name,
+            types: Array.isArray(r.types) ? r.types as string[] : [],
+        }),
     };
 }
 
@@ -114,11 +120,14 @@ export async function searchNearbyPlaces(
 
     let pool: RecommendedPlace[] = [];
 
-    const nearbyPlaces = keyword.length ? await fetchNearByKeyword(keyword, lat, lng, apiRadius, googleKey) : [];
-    pool = [...nearbyPlaces];
-
-    if (pool.length === 0) {
-        pool = await fetchTextSearch(query, lat, lng, apiRadius, googleKey);
+    if (placesProvider() === 'brave') {
+        pool = await fetchBraveRecommended(keyword, lat, lng, apiRadius);
+    } else {
+        const nearbyPlaces = keyword.length ? await fetchNearByKeyword(keyword, lat, lng, apiRadius, googleKey) : [];
+        pool = [...nearbyPlaces];
+        if (pool.length === 0) {
+            pool = await fetchTextSearch(query, lat, lng, apiRadius, googleKey);
+        }
     }
 
     pool = dedupeByPlaceId(pool);
@@ -173,17 +182,50 @@ export async function searchNearbyPlaces(
     );
 
     const localityFiltered = await filterPlacesToAnchorLocality(lat, lng, asPlaces, googleKey);
+    const chosen = localityFiltered.slice(0, 5);
+    if (placesProvider() === 'brave') {
+        for (const place of chosen) {
+            if (!place.country) place.country = await countryFromCoords(place.lat, place.lng, googleKey);
+        }
+    }
+    return chosen;
+}
 
-    return localityFiltered.slice(0, 5);
+export interface FoundPlace {
+    placeId: string;
+    name: string;
+    address: string;
+    lat: number;
+    lng: number;
+    photoReference: string | null;
+    openingHours: string | null;
+    country: string;
+    placeCategory?: string;
 }
 
 export async function searchPlaceAutocomplete(
     input: string,
     userLat: number,
     userLng: number,
-): Promise<{ placeId: string; name: string } | null> {
+): Promise<FoundPlace | null> {
     const googleKey = Deno.env.get('GOOGLE_MAPS_API_KEY') ?? '';
     const { autocompleteRadiusMeters } = readNearMeGeoEnv();
+    if (placesProvider() === 'brave') {
+        const [first] = await fetchBraveRecommended(input, userLat, userLng, autocompleteRadiusMeters);
+        if (!first) return null;
+        if (!first.country) first.country = await countryFromCoords(first.lat, first.lng, googleKey);
+        return {
+            placeId: first.placeId,
+            name: first.name,
+            address: first.address,
+            lat: first.lat,
+            lng: first.lng,
+            photoReference: first.photoReference,
+            openingHours: first.openingHours ?? null,
+            country: first.country,
+            placeCategory: first.placeCategory,
+        };
+    }
     const params = new URLSearchParams({
         input,
         location: `${userLat},${userLng}`,
@@ -199,5 +241,11 @@ export async function searchPlaceAutocomplete(
     return {
         placeId: first.place_id,
         name: first.structured_formatting?.main_text ?? first.description,
+        address: '',
+        lat: 0,
+        lng: 0,
+        photoReference: null,
+        openingHours: null,
+        country: '',
     };
 }

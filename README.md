@@ -54,7 +54,8 @@ Static examples from an earlier build (UI may differ slightly in the current app
    | --- | --- | --- |
    | `EXPO_PUBLIC_SUPABASE_URL` | yes | Supabase project URL. Read by the committed `lib/supabase.ts` client. |
    | `EXPO_PUBLIC_SUPABASE_ANON_KEY` | yes | Supabase anon (publishable) key. |
-   | `EXPO_PUBLIC_GOOGLE_MAPS_API_KEY` | yes | Map, Places, and directions. |
+   | `EXPO_PUBLIC_GOOGLE_MAPS_API_KEY` | yes | Map, directions, and the Google place-search fallback. Country folders still use this key for reverse geocoding. |
+   | `EXPO_PUBLIC_PLACES_PROVIDER` | no | `brave` (default) or `google`. Chooses place search, details, and photos. |
    | `EXPO_PUBLIC_IMAGE_UPLOAD_MAX_EDGE` | no | Longest edge of uploaded photos. Default `2048`. |
    | `EXPO_PUBLIC_IMAGE_UPLOAD_JPEG_QUALITY` | no | Upload JPEG quality from `0` to `1`. Default `0.82`. |
    | `EXPO_PUBLIC_PIN_THUMB_MAX_EDGE` | no | Longest edge of map-pin thumbnails. Default `200`. |
@@ -66,7 +67,10 @@ Static examples from an earlier build (UI may differ slightly in the current app
    | --- | --- |
    | `GEMINI_API_KEY` | `plan-agent` |
    | `GEMINI_MODEL` | Optional model id. Default `gemini-2.5-flash-lite`. |
-   | `GOOGLE_MAPS_API_KEY` | `plan-agent` Places and geocoding. |
+   | `GOOGLE_MAPS_API_KEY` | `plan-agent` geocoding, and Places when `PLACES_PROVIDER=google`. |
+   | `BRAVE_SEARCH_API_KEY` | Brave Place Search. Used by `places-proxy` and by `plan-agent` when `PLACES_PROVIDER` is `brave`. |
+   | `PLACES_PROVIDER` | Optional. `brave` (default) or `google`. Server-side place search for `plan-agent`. |
+   | `PLACES_PROXY_DAILY_LIMIT` | Optional per-user UTC daily cap for `places-proxy`. Default `400`. |
    | `PLAN_AGENT_DAILY_LIMIT` | Optional per-user UTC daily cap. Default `40`. |
    | `IMPORT_VIDEO_DAILY_LIMIT` | Optional per-user UTC daily cap. Default `20`. |
    | `MODAL_TRANSCRIBE_URL` | Modal HTTP endpoint called by `import-video-job`. |
@@ -91,7 +95,7 @@ Native projects are not committed (`ios/` and `android/` are ignored); use Expo 
 | `npm start` | Expo dev server |
 | `npm run android` / `npm run ios` / `npm run web` | Platform targets |
 | `npm run lint` | ESLint |
-| `npm run test:plan-agent` | Deno tests for plan-agent helpers, auth, rate limit, and classify JSON |
+| `npm run test:plan-agent` | Deno tests for plan-agent helpers, auth, rate limit, classify JSON, and places-proxy |
 | `npm run backfill:memory-thumbs` | Create ~200px `thumb_uri` files for memories that do not have one |
 
 ## Roadmap (directional)

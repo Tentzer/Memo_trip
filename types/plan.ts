@@ -1,3 +1,5 @@
+import type { MemoryPlaceCategory } from '@/types/memory';
+
 export type StopCategory = 'food' | 'shopping' | 'attraction' | 'other';
 
 export interface PlanStop {
@@ -28,6 +30,8 @@ export interface RecommendedPlace {
     lng: number;
     country: string;
     description: string;
+    openingHours?: string | null;
+    placeCategory?: MemoryPlaceCategory;
 }
 
 export interface RecommendationSection {
