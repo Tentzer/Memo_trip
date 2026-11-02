@@ -1,5 +1,8 @@
+import { cacheDirectory, downloadAsync } from 'expo-file-system/legacy';
 import { manipulateAsync, SaveFormat, type Action } from 'expo-image-manipulator';
 import { Image } from 'react-native';
+
+import { braveProxiedThumbUrl, pinThumbnailForRemoteCover } from '@/lib/remotePinThumbnail';
 
 const DEFAULT_MAX_EDGE = 2048;
 const DEFAULT_JPEG_QUALITY = 0.82;
@@ -34,7 +37,7 @@ function pinThumbQualityFromEnv(): number {
     return Number.isFinite(n) && n > 0 && n <= 1 ? n : DEFAULT_PIN_THUMB_QUALITY;
 }
 
-function isRemoteHttpUri(uri: string): boolean {
+export function isRemoteHttpUri(uri: string): boolean {
     const lower = uri.toLowerCase();
     return lower.startsWith('http://') || lower.startsWith('https://');
 }
@@ -85,7 +88,7 @@ export async function compressLocalImageForUpload(uri: string): Promise<string> 
 
 /**
  * JPEG whose longest edge is about 200px, for map pins.
- * Remote http(s) URIs are resized too.
+ * Local camera and gallery files only. Remote covers are downloaded first.
  */
 export async function createPinThumbnail(uri: string): Promise<string> {
     const maxEdge = pinThumbEdgeFromEnv();
@@ -106,4 +109,34 @@ export async function createPinThumbnail(uri: string): Promise<string> {
         format: SaveFormat.JPEG,
     });
     return result.uri;
+}
+
+export function remoteThumbnailFallback(uri: string): string {
+    return braveProxiedThumbUrl(uri, pinThumbEdgeFromEnv());
+}
+
+/**
+ * Local JPEG to upload, or a remote thumbnail URL when a remote cover cannot be rendered.
+ * Camera files stay on the local manipulator path.
+ */
+export async function preparePinThumbnail(
+    uri: string,
+): Promise<{ uploadUri: string } | { fallbackUrl: string }> {
+    if (!isRemoteHttpUri(uri)) {
+        return { uploadUri: await createPinThumbnail(uri) };
+    }
+    return pinThumbnailForRemoteCover(uri, {
+        edge: pinThumbEdgeFromEnv(),
+        compress: pinThumbQualityFromEnv(),
+        cacheDirectory: cacheDirectory ?? '',
+        downloadAsync: (from, to) => downloadAsync(from, to),
+        getImageSize,
+        manipulateAsync: async (localUri, actions, options) => {
+            const rendered = await manipulateAsync(localUri, actions, {
+                compress: options.compress,
+                format: SaveFormat.JPEG,
+            });
+            return { uri: rendered.uri };
+        },
+    });
 }

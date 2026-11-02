@@ -1,4 +1,9 @@
-import { compressLocalImageForUpload, createPinThumbnail } from '@/lib/imageCompress';
+import {
+    compressLocalImageForUpload,
+    isRemoteHttpUri,
+    preparePinThumbnail,
+    remoteThumbnailFallback,
+} from '@/lib/imageCompress';
 import { uploadMemoryJpeg } from '@/lib/memoryBucket';
 import { getCountryNameFromCoords, normalizeLocationFolderName, toFolderLookupKey } from '@/lib/geocoding';
 import {
@@ -362,11 +367,20 @@ export async function uploadPicture(
         const publicUrl = await uploadMemoryJpeg(fileName, uriForUpload);
 
         let thumbUrl: string | null = null;
+        const remoteCover = isRemoteHttpUri(photoUri) || isRemoteHttpUri(uriForUpload);
         try {
-            const thumbLocalUri = await createPinThumbnail(uriForUpload);
-            thumbUrl = await uploadMemoryJpeg(`thumbs/${tempId}.jpg`, thumbLocalUri);
+            const prepared = await preparePinThumbnail(uriForUpload);
+            if ('fallbackUrl' in prepared) {
+                thumbUrl = prepared.fallbackUrl;
+            } else {
+                thumbUrl = await uploadMemoryJpeg(`thumbs/${tempId}.jpg`, prepared.uploadUri);
+            }
         } catch (thumbError) {
-            console.error('Pin thumbnail upload failed:', thumbError);
+            if (remoteCover) {
+                thumbUrl = remoteThumbnailFallback(photoUri);
+            } else {
+                console.error('Pin thumbnail upload failed:', thumbError);
+            }
         }
 
         const titleVal = options?.title?.trim() || null;
