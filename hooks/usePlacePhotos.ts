@@ -3,21 +3,17 @@ import { useEffect, useState } from 'react';
 import { loadPlacePhotos, type PlacePhotoSource } from '@/lib/places/loadPlacePhotos';
 import type { PlacePhoto } from '@/lib/places/placePhotos';
 import { readSessionPlacePhotos } from '@/lib/places/placePhotoSession';
+import type { PlacePhotosResult } from '@/lib/placePhotoGallery';
 import type { Memory } from '@/types/memory';
 
 export type { PlacePhoto } from '@/lib/places/placePhotos';
+export type { PlacePhotosResult } from '@/lib/placePhotoGallery';
 
 export type PlacePhotoMemory = Pick<Memory, 'id' | 'title' | 'latitude' | 'longitude'> & {
     placeId?: string;
 };
 
-export interface UsePlacePhotosResult {
-    photos: PlacePhoto[];
-    loading: boolean;
-    error: string | null;
-}
-
-const EMPTY: UsePlacePhotosResult = { photos: [], loading: false, error: null };
+const EMPTY: PlacePhotosResult = { photos: [], loading: false, error: null };
 
 function canLoad(memory: PlacePhotoSource): boolean {
     if (!Number.isFinite(memory.latitude) || !Number.isFinite(memory.longitude)) return false;
@@ -26,10 +22,12 @@ function canLoad(memory: PlacePhotoSource): boolean {
 
 /**
  * Loads up to 5 place photos when a memory detail sheet mounts.
- * Does nothing while the map is merely browsing, because nothing on the map calls this hook.
+ * The carousel calls this with the open memory. Map browsing does not.
  */
-export function usePlacePhotos(memory: PlacePhotoMemory | Memory | null | undefined): UsePlacePhotosResult {
-    const [state, setState] = useState<UsePlacePhotosResult>(EMPTY);
+export function usePlacePhotos(
+    memory: (Memory & { placeId?: string }) | PlacePhotoMemory | null | undefined,
+): PlacePhotosResult {
+    const [state, setState] = useState<PlacePhotosResult>(EMPTY);
     const memoryId = memory?.id;
     const title = memory?.title;
     const latitude = memory?.latitude;

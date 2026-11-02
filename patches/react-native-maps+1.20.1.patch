@@ -1,0 +1,87 @@
+diff --git a/node_modules/react-native-maps/ios/AirGoogleMaps/AIRGoogleMap.m b/node_modules/react-native-maps/ios/AirGoogleMaps/AIRGoogleMap.m
+index a1ffe69..8f0e902 100644
+--- a/node_modules/react-native-maps/ios/AirGoogleMaps/AIRGoogleMap.m
++++ b/node_modules/react-native-maps/ios/AirGoogleMaps/AIRGoogleMap.m
+@@ -148,6 +148,11 @@ id regionAsJSON(MKCoordinateRegion region) {
+ #pragma clang diagnostic push
+ #pragma clang diagnostic ignored "-Wobjc-missing-super-calls"
+ - (void)insertReactSubview:(id<RCTComponent>)subview atIndex:(NSInteger)atIndex {
++  // Fabric interop can pass a nil child or an index past the current array while
++  // markers are mounted and unmounted in one transaction. NSMutableArray throws.
++  if (subview == nil) {
++    return;
++  }
+   // Our desired API is to pass up markers/overlays as children to the mapview component.
+   // This is where we intercept them and do the appropriate underlying mapview action.
+   if ([subview isKindOfClass:[AIRGoogleMapMarker class]]) {
+@@ -185,10 +190,15 @@ id regionAsJSON(MKCoordinateRegion region) {
+   } else {
+     NSArray<id<RCTComponent>> *childSubviews = [subview reactSubviews];
+     for (int i = 0; i < childSubviews.count; i++) {
+-      [self insertReactSubview:(UIView *)childSubviews[i] atIndex:atIndex];
++      id<RCTComponent> child = childSubviews[i];
++      if (child == nil) {
++        continue;
++      }
++      [self insertReactSubview:(UIView *)child atIndex:atIndex];
+     }
+   }
+-  [_reactSubviews insertObject:(UIView *)subview atIndex:(NSUInteger) atIndex];
++  NSUInteger safeIndex = MIN((NSUInteger)MAX(atIndex, 0), _reactSubviews.count);
++  [_reactSubviews insertObject:(UIView *)subview atIndex:safeIndex];
+ }
+ #pragma clang diagnostic pop
+ 
+@@ -196,6 +206,9 @@ id regionAsJSON(MKCoordinateRegion region) {
+ #pragma clang diagnostic push
+ #pragma clang diagnostic ignored "-Wobjc-missing-super-calls"
+ - (void)removeReactSubview:(id<RCTComponent>)subview {
++  if (subview == nil) {
++    return;
++  }
+   // similarly, when the children are being removed we have to do the appropriate
+   // underlying mapview action here.
+   if ([subview isKindOfClass:[AIRGoogleMapMarker class]]) {
+diff --git a/node_modules/react-native-maps/ios/AirMaps/AIRMap.m b/node_modules/react-native-maps/ios/AirMaps/AIRMap.m
+index 07a4638..173e4db 100644
+--- a/node_modules/react-native-maps/ios/AirMaps/AIRMap.m
++++ b/node_modules/react-native-maps/ios/AirMaps/AIRMap.m
+@@ -104,6 +104,11 @@ const NSInteger AIRMapMaxZoomLevel = 20;
+ #pragma clang diagnostic push
+ #pragma clang diagnostic ignored "-Wobjc-missing-super-calls"
+ - (void)insertReactSubview:(id<RCTComponent>)subview atIndex:(NSInteger)atIndex {
++    // Same Fabric nil/index crash as AIRGoogleMap. Apple Maps is not the current provider,
++    // but the insert is the same unguarded NSMutableArray call.
++    if (subview == nil) {
++        return;
++    }
+     // Our desired API is to pass up markers/overlays as children to the mapview component.
+     // This is where we intercept them and do the appropriate underlying mapview action.
+     if ([subview isKindOfClass:[AIRMapMarker class]]) {
+@@ -132,16 +137,24 @@ const NSInteger AIRMapMaxZoomLevel = 20;
+     } else {
+         NSArray<id<RCTComponent>> *childSubviews = [subview reactSubviews];
+         for (int i = 0; i < childSubviews.count; i++) {
+-            [self insertReactSubview:(UIView *)childSubviews[i] atIndex:atIndex];
++            id<RCTComponent> child = childSubviews[i];
++            if (child == nil) {
++                continue;
++            }
++            [self insertReactSubview:(UIView *)child atIndex:atIndex];
+         }
+     }
+-    [_reactSubviews insertObject:(UIView *)subview atIndex:(NSUInteger) atIndex];
++    NSUInteger safeIndex = MIN((NSUInteger)MAX(atIndex, 0), _reactSubviews.count);
++    [_reactSubviews insertObject:(UIView *)subview atIndex:safeIndex];
+ }
+ #pragma clang diagnostic pop
+ 
+ #pragma clang diagnostic push
+ #pragma clang diagnostic ignored "-Wobjc-missing-super-calls"
+ - (void)removeReactSubview:(id<RCTComponent>)subview {
++    if (subview == nil) {
++        return;
++    }
+     // similarly, when the children are being removed we have to do the appropriate
+     // underlying mapview action here.
+     if ([subview isKindOfClass:[AIRMapMarker class]]) {

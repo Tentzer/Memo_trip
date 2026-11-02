@@ -8,7 +8,7 @@ import SearchBar, { SEARCH_BAR_ROW_HEIGHT_PX } from '@/components/SearchBar';
 import { type SettingsSheetRef } from '@/components/SettingsSheet';
 import { darkMapStyle } from '@/constants/darkMapStyle';
 import { useAuth } from '@/context/AuthContext';
-import { useLibrariesOverlay } from '@/context/LibrariesOverlayContext';
+import { useLibrariesOverlay, useLibrariesOverlayActions } from '@/context/LibrariesOverlayContext';
 import { type Memory, useMemories } from '@/context/MemoryContext';
 import { useAppTheme } from '@/context/ThemeContext';
 import { useClusteredMapMarkers } from '@/hooks/useClusteredMapMarkers';
@@ -28,11 +28,21 @@ const DEFAULT_LATITUDE = 32.0853;
 const DEFAULT_LONGITUDE = 34.7818;
 const INITIAL_LONGITUDE_DELTA = 0.01;
 
+function LibrariesAwareChrome({ children }: { children: React.ReactNode }) {
+    const { visible } = useLibrariesOverlay();
+    return (
+        <View pointerEvents={visible ? 'none' : 'box-none'} style={StyleSheet.absoluteFill}>
+            {children}
+        </View>
+    );
+}
+
 export default function MapScreen() {
     const insets = useSafeAreaInsets();
     const tabBarHeight = useBottomTabBarHeight();
     const router = useRouter();
     const auth = useAuth();
+    const { close: closeLibrariesOverlay } = useLibrariesOverlayActions();
     const { isDarkMode, setIsDarkMode, theme } = useAppTheme();
     const mapChromeTop = insets.top + 16;
     const menuBelowSearchGap = 10;
@@ -57,14 +67,13 @@ export default function MapScreen() {
     } = useMemories();
 
     const settingsSheetRef = useRef<SettingsSheetRef>(null);
-    const { visible: librariesOverlayVisible, close: closeLibrariesOverlay } = useLibrariesOverlay();
     const [marketplaceVisible, setMarketplaceVisible] = useState(false);
     const [invitesVisible, setInvitesVisible] = useState(false);
     const [isMapReady, setIsMapReady] = useState(false);
     const processedFolderFilterRef = useRef<string | null>(null);
-    const openMemoActionsRef = useRef<(memory: Memory) => void>(() => {});
+    const openMemoInfoRef = useRef<(memory: Memory) => void>(() => {});
     const handleMarkerAction = useCallback((memory: Memory) => {
-        openMemoActionsRef.current(memory);
+        openMemoInfoRef.current(memory);
     }, []);
 
     const mapCurtainOpacity = useSharedValue(1);
@@ -115,18 +124,15 @@ export default function MapScreen() {
 
     const {
         isInfoModalVisible,
-        actionSheetMemory,
         selectedMemoryForInfo,
-        selectedMemoryForActions,
-        openMemoActions,
-        closeMemoActions,
+        openMemoInfo,
         closeMemoInfo,
         handleSaveMemoInfo,
-        handleOpenInfoFromActions,
         handleWalkToMemo,
         handleDriveToMemo,
-        handleShareMemoFromActions,
-        handleDeleteMemoFromActions,
+        handleShareMemo,
+        handleDeleteMemo,
+        handleInfoModalDismissed,
     } = useHomeMemoActions({
         memories,
         sharedLibraryMemories,
@@ -142,7 +148,7 @@ export default function MapScreen() {
         setShareRecipient,
         setIsShareMemoryVisible,
     });
-    openMemoActionsRef.current = openMemoActions;
+    openMemoInfoRef.current = openMemoInfo;
 
     const handleOpenSettings = useCallback(() => {
         Keyboard.dismiss();
@@ -163,7 +169,7 @@ export default function MapScreen() {
         );
     }, [memories, sharedLibraryMemories, destinationLatitude, destinationLongitude]);
 
-    const { markerItemsToRender, handleRegionChangeComplete, handleClusterPress } = useClusteredMapMarkers({
+    const { markerItemsToRender, handleRegionChange, handleRegionChangeComplete, handleClusterPress } = useClusteredMapMarkers({
         ownedMemories: visibleOwnedMemories,
         sharedMemories: visibleSharedMemories,
         showMemoriesOnMap,
@@ -171,8 +177,6 @@ export default function MapScreen() {
         revealMemoriesIncrementally,
         finishMemoriesMapLoad,
         mapRef,
-        insetsTop: insets.top,
-        tabBarHeight,
     });
 
     const handleRoutePress = useCallback(() => {
@@ -226,10 +230,21 @@ export default function MapScreen() {
         setUserChoseAddress,
     ]);
 
+    const mapMovedRef = useRef(false);
+    const handlePanDrag = useCallback(() => {
+        if (mapMovedRef.current) return;
+        mapMovedRef.current = true;
+        setMapMoved(true);
+    }, [setMapMoved]);
     const handleRecenter = useCallback(() => {
+        mapMovedRef.current = false;
         void returnToStartingPoint({ forceRefresh: true });
         setMapMoved(false);
     }, [returnToStartingPoint, setMapMoved]);
+    const mapPadding = useMemo(
+        () => ({ top: 0, right: 0, bottom: tabBarHeight, left: 0 }),
+        [tabBarHeight],
+    );
 
     const initialMapCenterDoneRef = useRef(false);
     useEffect(() => {
@@ -266,8 +281,7 @@ export default function MapScreen() {
 
     return (
         <View style={[styles.screen, { backgroundColor: theme.colors.background }]}>
-            {!librariesOverlayVisible ? (
-                <>
+            <LibrariesAwareChrome>
                     <TouchableOpacity
                         onPress={handleOpenSettings}
                         style={[
@@ -297,8 +311,7 @@ export default function MapScreen() {
                         onClear={clearMapLibraryFilter}
                         onApply={applyLibraryFilter}
                     />
-                </>
-            ) : null}
+            </LibrariesAwareChrome>
 
             <SearchBar
                 showSearchBar={showSearchBar}
@@ -324,12 +337,14 @@ export default function MapScreen() {
                             mapCurtainOpacity.value = withTiming(0, { duration: 300 });
                         }}
                         onMapLoaded={() => setIsMapReady(true)}
+                        onRegionChange={handleRegionChange}
                         onRegionChangeComplete={handleRegionChangeComplete}
-                        onPanDrag={() => setMapMoved(true)}
+                        onPanDrag={handlePanDrag}
                         onPress={() => {
                             Keyboard.dismiss();
                             setIsLibraryFilterVisible(false);
                         }}
+                        mapPadding={mapPadding}
                         showsUserLocation={true}
                         showsCompass={true}
                         rotateEnabled={true}
@@ -341,7 +356,7 @@ export default function MapScreen() {
                             longitudeDelta: INITIAL_LONGITUDE_DELTA,
                         }}
                     >
-                        {userChoseAddress && !isPlaceAlreadySaved && destinationLatitude !== 0 && destinationLongitude !== 0 && (
+                        {userChoseAddress && !isPlaceAlreadySaved && destinationLatitude !== 0 && destinationLongitude !== 0 ? (
                             <Marker
                                 key="destination-pin"
                                 coordinate={{
@@ -353,7 +368,7 @@ export default function MapScreen() {
                                 pinColor="red"
                                 zIndex={1}
                             />
-                        )}
+                        ) : null}
 
                         {/* Custom markers snapshot incorrectly if they mount before the native map is ready. */}
                         {isMapReady ? (
@@ -364,16 +379,16 @@ export default function MapScreen() {
                             />
                         ) : null}
 
-                        {routeCoordinates?.length && showRoute && (
+                        {showRoute && (routeCoordinates?.length ?? 0) > 0 ? (
                             <Polyline
-                                coordinates={routeCoordinates}
+                                coordinates={routeCoordinates ?? []}
                                 strokeColor="#3B82F6"
                                 strokeWidth={4}
                                 lineCap="round"
                                 lineJoin="round"
                                 lineDashPattern={[8, 15]}
                             />
-                        )}
+                        ) : null}
                     </MapView>
                 )}
 
@@ -404,14 +419,13 @@ export default function MapScreen() {
             </View>
 
             <LibraryModal
-                visible={isGalleryVisible || isCountryLibraryVisible || librariesOverlayVisible}
-                enableSwipeToClose={librariesOverlayVisible && !isGalleryVisible && !isCountryLibraryVisible}
+                visible={isGalleryVisible || isCountryLibraryVisible}
+                enableSwipeToClose={!isGalleryVisible && !isCountryLibraryVisible}
                 onClose={() => {
                     setIsGalleryVisible(false);
                     setIsCountryLibraryVisible(false);
-                    closeLibrariesOverlay();
                 }}
-                variant={isCountryLibraryVisible || librariesOverlayVisible ? 'countries' : 'custom'}
+                variant={isCountryLibraryVisible || !isGalleryVisible ? 'countries' : 'custom'}
                 memories={memories}
                 sharedLibraryMemories={sharedLibraryMemories}
                 customFolders={customFolders}
@@ -432,14 +446,11 @@ export default function MapScreen() {
             <HomeOverlayModals
                 userId={auth.user?.id}
                 isSignedIn={Boolean(auth.user)}
-                actionSheetMemory={actionSheetMemory}
-                selectedMemoryForActions={selectedMemoryForActions}
-                onCloseActions={closeMemoActions}
-                onOpenInfoFromActions={handleOpenInfoFromActions}
-                onStartWalkingRoute={() => { void handleWalkToMemo(); }}
-                onOpenDrivingRoute={handleDriveToMemo}
-                onShareFromActions={handleShareMemoFromActions}
-                onDeleteFromActions={handleDeleteMemoFromActions}
+                onWalkFromInfo={() => { void handleWalkToMemo(); }}
+                onDriveFromInfo={handleDriveToMemo}
+                onShareFromInfo={handleShareMemo}
+                onDeleteFromInfo={handleDeleteMemo}
+                onInfoDismissed={handleInfoModalDismissed}
                 isInfoModalVisible={isInfoModalVisible}
                 selectedMemoryForInfo={selectedMemoryForInfo}
                 onCloseInfo={closeMemoInfo}

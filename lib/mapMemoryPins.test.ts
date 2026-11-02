@@ -1,19 +1,28 @@
 import { describe, expect, it } from '@jest/globals';
+import { clusterMapPins, createMapClusterIndex, previewMapMarkers, queryMapClusters } from '@/lib/mapClusterIndex';
+import { pinMarkerProps } from '@/lib/markerPinProps';
+import { markerItemKey, planMountedMarkers, reuseStableMarkerItems } from '@/lib/visibleMapMarkers';
 import {
+    CLUSTER_ZOOM_SETTLE_MS,
+    CLUSTER_RADIUS_PX,
     MAX_CLUSTER_ZOOM,
-    clusterMapPins,
     clusterRadiusMeters,
+    commitSettledClusterZoom,
+    createClusterZoomGate,
     filterOwnedMapMemories,
     filterSharedMapMemories,
     formatClusterCount,
     isValidMapCoordinate,
     longitudeDeltaForZoom,
+    nextCommittedClusterZoom,
+    noteClusterZoomSample,
     pinImageUri,
     toMapMemoryPins,
     zoomBucketFromLongitudeDelta,
     type MapMarkerItem,
     type MapMemoryPin,
 } from '@/lib/mapMemoryPins';
+import { MAX_MOUNTED_MARKERS, selectVisibleMarkers } from '@/lib/visibleMapMarkers';
 import type { Memory } from '@/types/memory';
 
 const METERS_PER_LATITUDE_DEGREE = 111_320;
@@ -155,7 +164,7 @@ describe('map pin images and coordinates', () => {
 });
 
 describe('map pin clustering', () => {
-    const zoom = 14;
+    const zoom = 13;
     const radius = clusterRadiusMeters(zoom);
     const origin = 32;
     const near = pin('a', origin, 'owned', '2026-01-01T00:00:00.000Z');
@@ -176,7 +185,8 @@ describe('map pin clustering', () => {
         expect(cluster.cluster.hasOwned).toBe(true);
         expect(cluster.cluster.hasShared).toBe(true);
         expect(solo.pin.memory.id).toBe('c');
-        expect(cluster.cluster.latitude).toBeCloseTo((near.memory.latitude + closer.memory.latitude) / 2);
+        expect(cluster.cluster.latitude).toBe((near.memory.latitude + closer.memory.latitude) / 2);
+        expect(cluster.cluster.longitude).toBe(near.memory.longitude);
     });
 
     it('uses the same cluster for either input order', () => {
@@ -190,8 +200,171 @@ describe('map pin clustering', () => {
         expect(zoomBucketFromLongitudeDelta(0.01)).toBe(15);
     });
 
+    it('keeps nearby businesses as separate pins at zoom 14 and 15', () => {
+        const touching = clusterRadiusMeters(13) * 0.4;
+        const here = pin('shop-a', 32, 'owned', '2026-01-01T00:00:00.000Z');
+        const nextDoor = pin('shop-b', northOf(32, touching), 'owned', '2026-02-01T00:00:00.000Z');
+        expect(clusterMapPins([here, nextDoor], 15).map((item) => item.type)).toEqual(['pin', 'pin']);
+        expect(clusterMapPins([here, nextDoor], 14).map((item) => item.type)).toEqual(['pin', 'pin']);
+        expect(clusterMapPins([here, nextDoor], 13).some((item) => item.type === 'cluster')).toBe(true);
+        expect(CLUSTER_RADIUS_PX).toBe(44);
+        expect(clusterRadiusMeters(13)).toBeGreaterThan(800);
+        expect(clusterRadiusMeters(13)).toBeLessThan(900);
+    });
+
+    it('still caps how many individual pins mount when clustering is off', () => {
+        const pins = Array.from({ length: MAX_MOUNTED_MARKERS + 12 }, (_, index) =>
+            pin(`dense-${index}`, 32 + index * 0.0004, 'owned', '2026-01-01T00:00:00.000Z'),
+        );
+        const items = clusterMapPins(pins, 14);
+        expect(items.every((item) => item.type === 'pin')).toBe(true);
+        const visible = selectVisibleMarkers(items, {
+            latitude: 32,
+            longitude: 34,
+            latitudeDelta: 0.2,
+            longitudeDelta: 0.2,
+        });
+        expect(visible).toHaveLength(MAX_MOUNTED_MARKERS);
+    });
+
     it('formats the count badge', () => {
         expect(formatClusterCount(2)).toBe('2');
         expect(formatClusterCount(100)).toBe('99+');
+    });
+
+    it('keeps a stable cluster id for the same points and zoom', () => {
+        const radius = clusterRadiusMeters(zoom);
+        const anchor = pin('a', origin, 'owned', '2026-01-01T00:00:00.000Z');
+        const neighbor = pin('b', northOf(origin, radius * 0.4), 'shared', '2026-04-01T00:00:00.000Z');
+        const farther = pin('c', northOf(origin, radius * 3.2), 'owned', '2026-02-01T00:00:00.000Z');
+        const first = clusterMapPins([farther, neighbor, anchor], zoom);
+        const second = clusterMapPins([neighbor, farther, anchor], zoom);
+        const firstCluster = first.find((item) => item.type === 'cluster');
+        const secondCluster = second.find((item) => item.type === 'cluster');
+        if (firstCluster?.type !== 'cluster' || secondCluster?.type !== 'cluster') {
+            throw new Error('expected clusters');
+        }
+        expect(firstCluster.cluster.id).toBe('cluster:a');
+        expect(secondCluster.cluster.id).toBe(firstCluster.cluster.id);
+        expect(firstCluster.cluster.count).toBe(2);
+        expect(first.filter((item) => item.type === 'pin')).toHaveLength(1);
+        expect(firstCluster.cluster.expansionZoom).toBeGreaterThan(zoom);
+        expect(firstCluster.cluster.expansionZoom).toBeLessThanOrEqual(MAX_CLUSTER_ZOOM);
+    });
+
+    it('queries one index by bbox and stops clustering at neighborhood zoom', () => {
+        const index = createMapClusterIndex([far, closer, near]);
+        const region = {
+            latitude: origin,
+            longitude: 34,
+            latitudeDelta: 0.02,
+            longitudeDelta: 0.02,
+        };
+        const nearby = queryMapClusters(index, region, zoom, 0.45);
+        const again = queryMapClusters(index, region, zoom, 0.45);
+        expect(again).toEqual(nearby);
+        expect(nearby).toHaveLength(1);
+        expect(nearby[0]?.type).toBe('cluster');
+        if (nearby[0]?.type !== 'cluster') throw new Error('expected a cluster');
+        expect(nearby[0].cluster.members.map((member) => member.memory.id)).toEqual(['a', 'b']);
+        expect(nearby[0].cluster.expansionZoom).toBe(MAX_CLUSTER_ZOOM);
+        const zoomedIn = queryMapClusters(index, region, MAX_CLUSTER_ZOOM, 0.45);
+        expect(zoomedIn.map((item) => item.type)).toEqual(['pin', 'pin']);
+        const wide = queryMapClusters(index, {
+            latitude: origin,
+            longitude: 34,
+            latitudeDelta: 1,
+            longitudeDelta: 1,
+        }, zoom, 0);
+        expect(memberCount(wide)).toBe(3);
+    });
+
+    it('keeps a pin key and props identical across zooms when membership is unchanged', () => {
+        const index = createMapClusterIndex([far, closer, near]);
+        const region = {
+            latitude: origin,
+            longitude: 34,
+            latitudeDelta: 1,
+            longitudeDelta: 1,
+        };
+        const grouped = queryMapClusters(index, region, zoom, 0.45);
+        const split = queryMapClusters(index, region, MAX_CLUSTER_ZOOM, 0.45);
+        const soloGrouped = grouped.find((item) => item.type === 'pin' && item.pin.memory.id === 'c');
+        const soloSplit = split.find((item) => item.type === 'pin' && item.pin.memory.id === 'c');
+        if (soloGrouped?.type !== 'pin' || soloSplit?.type !== 'pin') {
+            throw new Error('expected the far pin to stay individual');
+        }
+        expect(markerItemKey(soloGrouped)).toBe('owned:c');
+        expect(markerItemKey(soloSplit)).toBe(markerItemKey(soloGrouped));
+        expect(soloSplit.pin).toBe(soloGrouped.pin);
+        expect(pinMarkerProps(soloSplit.pin)).toBe(pinMarkerProps(soloGrouped.pin));
+        expect(pinMarkerProps(soloSplit.pin).coordinate).toBe(pinMarkerProps(soloGrouped.pin).coordinate);
+        expect(grouped.map(markerItemKey)).toEqual([...grouped.map(markerItemKey)].sort());
+        expect(split.map(markerItemKey)).toEqual([...split.map(markerItemKey)].sort());
+
+        const neighborhood = queryMapClusters(index, region, 15, 0.45);
+        const stillNeighborhood = queryMapClusters(index, region, MAX_CLUSTER_ZOOM, 0.45);
+        const stable = reuseStableMarkerItems(neighborhood, stillNeighborhood);
+        expect(stable.map(markerItemKey)).toEqual(neighborhood.map(markerItemKey));
+        expect(stable.find((item) => markerItemKey(item) === 'owned:c')).toBe(
+            neighborhood.find((item) => markerItemKey(item) === 'owned:c'),
+        );
+        const mounted = planMountedMarkers(neighborhood, stable);
+        expect(mounted.map(markerItemKey)).toEqual(stable.map(markerItemKey));
+        expect(mounted.find((item) => markerItemKey(item) === 'owned:c')).toBe(
+            neighborhood.find((item) => markerItemKey(item) === 'owned:c'),
+        );
+        expect(grouped.find((item) => item.type === 'cluster' && item.cluster.id === 'cluster:a')).toBeTruthy();
+        const zoomedOut = queryMapClusters(index, region, zoom - 1, 0.45);
+        expect(zoomedOut.find((item) => item.type === 'cluster' && item.cluster.id === 'cluster:a')).toBeTruthy();
+    });
+
+    it('keeps the same marker list and the original coordinate when zoom does not change membership', () => {
+        const exact = {
+            variant: 'owned' as const,
+            memory: memory('solo', { latitude: 32.123456789, longitude: 34.987654321 }),
+        };
+        const index = createMapClusterIndex([exact, far, closer, near]);
+        const wide = { latitude: origin, longitude: 34, latitudeDelta: 1, longitudeDelta: 1 };
+        const atNeighborhood = previewMapMarkers(index, wide, 15, []);
+        const stillThere = previewMapMarkers(index, wide, MAX_CLUSTER_ZOOM, atNeighborhood);
+        expect(stillThere).toBe(atNeighborhood);
+        const solo = atNeighborhood.find((item) => item.type === 'pin' && item.pin.memory.id === 'solo');
+        if (solo?.type !== 'pin') throw new Error('expected the solo pin');
+        expect(solo.pin.memory.latitude).toBe(32.123456789);
+        expect(solo.pin.memory.longitude).toBe(34.987654321);
+        expect(pinMarkerProps(solo.pin).coordinate.latitude).toBe(32.123456789);
+        expect(pinMarkerProps(solo.pin).coordinate.longitude).toBe(34.987654321);
+        expect(pinMarkerProps(solo.pin)).toBe(pinMarkerProps(solo.pin));
+    });
+});
+
+describe('cluster zoom settling', () => {
+    it('commits only the last zoom after a burst settles', () => {
+        const samples = [15.2, 14.1, 11.4, 8.2];
+        let gate = createClusterZoomGate(16);
+        samples.forEach((sample, index) => {
+            gate = noteClusterZoomSample(gate, longitudeDeltaForZoom(sample), index * 40);
+            const tooEarly = commitSettledClusterZoom(gate, index * 40 + CLUSTER_ZOOM_SETTLE_MS - 1);
+            expect(tooEarly.committedZoom).toBe(16);
+        });
+        const settled = commitSettledClusterZoom(gate, (samples.length - 1) * 40 + CLUSTER_ZOOM_SETTLE_MS);
+        expect(settled.committedZoom).toBe(8);
+        expect(settled.pendingZoom).toBeNull();
+    });
+
+    it('drops a pending zoom when the camera returns to the committed bucket', () => {
+        let gate = noteClusterZoomSample(createClusterZoomGate(16), longitudeDeltaForZoom(12.2), 0);
+        expect(gate.pendingZoom).toBe(12);
+        gate = noteClusterZoomSample(gate, longitudeDeltaForZoom(16), 50);
+        expect(gate.pendingZoom).toBeNull();
+        expect(commitSettledClusterZoom(gate, 50 + CLUSTER_ZOOM_SETTLE_MS).committedZoom).toBe(16);
+    });
+
+    it('keeps the current bucket when zoom only crosses the rounding boundary', () => {
+        expect(nextCommittedClusterZoom(16, longitudeDeltaForZoom(15.46))).toBe(16);
+        expect(nextCommittedClusterZoom(16, longitudeDeltaForZoom(15.2))).toBe(15);
+        expect(nextCommittedClusterZoom(15, longitudeDeltaForZoom(15.54))).toBe(15);
+        expect(nextCommittedClusterZoom(16, longitudeDeltaForZoom(8))).toBe(8);
     });
 });

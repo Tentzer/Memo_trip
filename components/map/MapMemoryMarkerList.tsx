@@ -1,6 +1,8 @@
 import { MapClusterMarker, MapMemoryMarker } from '@/components/map/MapMemoryMarker';
 import type { MapMarkerItem, MapPinCluster } from '@/lib/mapMemoryPins';
+import { markerItemKey } from '@/lib/visibleMapMarkers';
 import type { Memory } from '@/types/memory';
+import React from 'react';
 
 type MapMemoryMarkerListProps = {
     items: MapMarkerItem[];
@@ -8,32 +10,30 @@ type MapMemoryMarkerListProps = {
     onClusterPress: (cluster: MapPinCluster) => void;
 };
 
-export default function MapMemoryMarkerList({
+function MapMemoryMarkerList({
     items,
     onMarkerPress,
     onClusterPress,
 }: MapMemoryMarkerListProps) {
-    return (
-        <>
-            {items.map((item) => {
-                if (item.type === 'cluster') {
-                    return (
-                        <MapClusterMarker
-                            key={item.cluster.id}
-                            cluster={item.cluster}
-                            onPress={onClusterPress}
-                        />
-                    );
-                }
-                return (
-                    <MapMemoryMarker
-                        key={`${item.pin.variant}:${item.pin.memory.id}`}
-                        memory={item.pin.memory}
-                        variant={item.pin.variant}
-                        onMarkerPress={onMarkerPress}
-                    />
-                );
-            })}
-        </>
-    );
+    return items.map((item) => {
+        if (item.type === 'cluster') {
+            return (
+                <MapClusterMarker
+                    key={markerItemKey(item)}
+                    cluster={item.cluster}
+                    onPress={onClusterPress}
+                />
+            );
+        }
+        return (
+            <MapMemoryMarker
+                key={markerItemKey(item)}
+                memory={item.pin.memory}
+                variant={item.pin.variant}
+                onMarkerPress={onMarkerPress}
+            />
+        );
+    });
 }
+
+export default React.memo(MapMemoryMarkerList);
