@@ -101,8 +101,9 @@ export function useMarkerImageSnapshot(
     }, []);
 
     const onLoad = useCallback(() => {
+        if (memoryId) rememberPaintedMarker(memoryId, imageUri, 'loaded');
         setPhase('loaded');
-    }, []);
+    }, [imageUri, memoryId]);
 
     const onError = useCallback(() => {
         setPhase('error');

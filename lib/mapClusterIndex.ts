@@ -5,7 +5,14 @@ import {
     type MapMemoryPin,
     type MapPinCluster,
 } from '@/lib/mapMemoryPins';
-import { markerItemKey } from '@/lib/visibleMapMarkers';
+import {
+    MARKER_REGION_PADDING,
+    MAX_MOUNTED_MARKERS,
+    markerItemKey,
+    reuseStableMarkerItems,
+    selectVisibleMarkers,
+    stableMarkerOrder,
+} from '@/lib/visibleMapMarkers';
 import Supercluster, { type ClusterFeature, type PointFeature } from 'supercluster';
 
 /**
@@ -63,7 +70,6 @@ export function createMapClusterIndex(pins: readonly MapMemoryPin[]): MapCluster
                         ordered,
                         feature.properties.cluster_id,
                         feature.properties.point_count,
-                        feature.geometry.coordinates,
                     );
                     if (cluster) items.push({ type: 'cluster', cluster });
                     continue;
@@ -75,6 +81,22 @@ export function createMapClusterIndex(pins: readonly MapMemoryPin[]): MapCluster
             return items;
         },
     };
+}
+
+/**
+ * Markers for one camera. Returns `previous` itself when every mounted pin is unchanged,
+ * so a zoom does not have to re-render the map.
+ */
+export function previewMapMarkers(
+    index: MapClusterIndex,
+    region: MapClusterQueryRegion,
+    zoom: number,
+    previous: readonly MapMarkerItem[],
+    retainKeys?: ReadonlySet<string>,
+): MapMarkerItem[] {
+    const queried = queryMapClusters(index, region, zoom, MARKER_REGION_PADDING);
+    const selected = selectVisibleMarkers(queried, region, MAX_MOUNTED_MARKERS, retainKeys);
+    return reuseStableMarkerItems(previous, stableMarkerOrder(previous, selected));
 }
 
 /** Clusters and pins inside one camera region. Padding matches the marker viewport. */
@@ -115,7 +137,6 @@ function clusterFromFeature(
     pins: readonly MapMemoryPin[],
     clusterId: number,
     pointCount: number,
-    coordinates: number[],
 ): MapPinCluster | null {
     const members = index.getLeaves(clusterId, Math.max(pointCount, 1))
         .map((leaf) => pins[leaf.properties.pinIndex])
@@ -127,12 +148,20 @@ function clusterFromFeature(
     }, null);
     const anchor = members[0];
     if (!newest || !anchor) return null;
+    let latitude = 0;
+    let longitude = 0;
+    for (const member of members) {
+        latitude += member.memory.latitude;
+        longitude += member.memory.longitude;
+    }
     return {
         // Lowest member id, not supercluster's cluster_id. The numeric id changes
         // at every zoom and would reshuffle this marker among its neighbors.
+        // Position is the mean of the original coordinates. Supercluster's
+        // projected point drifts by zoom and would make the marker snap.
         id: `cluster:${anchor.memory.id}`,
-        latitude: coordinates[1] ?? newest.memory.latitude,
-        longitude: coordinates[0] ?? newest.memory.longitude,
+        latitude: latitude / members.length,
+        longitude: longitude / members.length,
         count: pointCount,
         newest,
         hasOwned: members.some((member) => member.variant === 'owned'),

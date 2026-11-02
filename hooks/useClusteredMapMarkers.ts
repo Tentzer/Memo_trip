@@ -1,7 +1,7 @@
 import { latitudeForMarkerViewportCenter } from '@/lib/mapCamera';
 import {
     createMapClusterIndex,
-    queryMapClusters,
+    previewMapMarkers,
 } from '@/lib/mapClusterIndex';
 import {
     CLUSTER_ZOOM_SETTLE_MS,
@@ -17,15 +17,10 @@ import {
     type MapPinCluster,
 } from '@/lib/mapMemoryPins';
 import {
-    MARKER_REGION_PADDING,
-    MAX_MOUNTED_MARKERS,
     markerItemKey,
     planMountedMarkers,
-    reuseStableMarkerItems,
+    regionForMarkerQuery,
     sameMarkerList,
-    selectVisibleMarkers,
-    shouldRefreshMarkerRegion,
-    stableMarkerOrder,
 } from '@/lib/visibleMapMarkers';
 import { useMapMarkerReveal } from '@/hooks/useMapMarkerReveal';
 import type { Memory } from '@/types/memory';
@@ -72,6 +67,9 @@ export function useClusteredMapMarkers({
     const zoomGateRef = useRef(createClusterZoomGate(initialZoom));
     const settleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const settleTokenRef = useRef(0);
+    const clusterIndexRef = useRef<ReturnType<typeof createMapClusterIndex> | null>(null);
+    const committedZoomRef = useRef(initialZoom);
+    const queryRegionRef = useRef<Region | null>(null);
     const [markerRegion, setMarkerRegion] = useState<Region | null>(null);
     const visibleRef = useRef<MapMarkerItem[]>([]);
     const mountedRef = useRef<MapMarkerItem[]>([]);
@@ -94,22 +92,19 @@ export function useClusteredMapMarkers({
         () => createMapClusterIndex(mapMemoryPins),
         [mapMemoryPins],
     );
-    const clusteredMarkers = useMemo(() => {
-        if (!markerRegion) return [];
-        return queryMapClusters(clusterIndex, markerRegion, clusterZoom, MARKER_REGION_PADDING);
-    }, [clusterIndex, markerRegion, clusterZoom]);
+    clusterIndexRef.current = clusterIndex;
     const visibleMarkers = useMemo(() => {
-        const selected = selectVisibleMarkers(
-            clusteredMarkers,
+        if (!markerRegion) return [];
+        const preview = previewMapMarkers(
+            clusterIndex,
             markerRegion,
-            MAX_MOUNTED_MARKERS,
+            clusterZoom,
+            visibleRef.current,
             mountedKeysRef.current,
         );
-        const ordered = stableMarkerOrder(visibleRef.current, selected);
-        const reused = reuseStableMarkerItems(visibleRef.current, ordered);
-        visibleRef.current = reused;
-        return reused;
-    }, [clusteredMarkers, markerRegion]);
+        visibleRef.current = preview;
+        return preview;
+    }, [clusterIndex, markerRegion, clusterZoom]);
     mountedKeysRef.current = new Set(visibleMarkers.map((item) => markerItemKey(item)));
     const revealCount = useMapMarkerReveal(
         visibleMarkers,
@@ -203,12 +198,22 @@ export function useClusteredMapMarkers({
                     pendingAtMs + CLUSTER_ZOOM_SETTLE_MS,
                 );
                 zoomGateRef.current = settled;
-                setClusterZoom((zoom) => (zoom === settled.committedZoom ? zoom : settled.committedZoom));
+                committedZoomRef.current = settled.committedZoom;
             }
-            const nextRegion = mapRegionRef.current;
-            setMarkerRegion((current) => (
-                shouldRefreshMarkerRegion(current, nextRegion) ? nextRegion : current
-            ));
+            const index = clusterIndexRef.current;
+            if (!index) return;
+            const queryRegion = regionForMarkerQuery(queryRegionRef.current, mapRegionRef.current);
+            const preview = previewMapMarkers(
+                index,
+                queryRegion,
+                committedZoomRef.current,
+                visibleRef.current,
+                mountedKeysRef.current,
+            );
+            queryRegionRef.current = queryRegion;
+            if (preview === visibleRef.current) return;
+            setClusterZoom(committedZoomRef.current);
+            setMarkerRegion(queryRegion);
         }, CLUSTER_ZOOM_SETTLE_MS);
     }, [clearSettleTimer]);
 

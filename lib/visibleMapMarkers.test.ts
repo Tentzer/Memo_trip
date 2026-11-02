@@ -1,9 +1,11 @@
 import { describe, expect, it } from '@jest/globals';
 import {
+    MARKER_REGION_PADDING,
     MAX_MOUNTED_MARKERS,
     markerItemKey,
     nextMarkerMountCount,
     planMountedMarkers,
+    regionForMarkerQuery,
     selectVisibleMarkers,
     shouldRefreshMarkerRegion,
     stableMarkerOrder,
@@ -95,6 +97,26 @@ describe('visible map markers', () => {
         expect(selected.map(markerItemKey)).toContain(`owned:${farId}`);
         const nearestOnly = selectVisibleMarkers(items, region);
         expect(nearestOnly.map(markerItemKey)).not.toContain(`owned:${farId}`);
+    });
+
+    it('keeps a pin one screen outside the viewport and drops one farther away', () => {
+        const inside = pinAt('in', region.latitude, region.longitude);
+        const oneScreen = pinAt('pad', region.latitude + region.latitudeDelta, region.longitude);
+        const farther = pinAt('far', region.latitude + region.latitudeDelta * 2, region.longitude);
+        const selected = selectVisibleMarkers([farther, oneScreen, inside], region);
+        expect(MARKER_REGION_PADDING).toBe(1);
+        expect(selected.map(markerItemKey)).toEqual(['owned:pad', 'owned:in']);
+        expect(selected.map(markerItemKey)).not.toContain('owned:far');
+    });
+
+    it('keeps the wider span while zooming in and follows a real pan', () => {
+        const zoomedOut = { ...region, latitudeDelta: 0.8, longitudeDelta: 0.8 };
+        const zoomedIn = { ...region, latitudeDelta: 0.2, longitudeDelta: 0.2 };
+        expect(regionForMarkerQuery(zoomedOut, zoomedIn).longitudeDelta).toBe(0.8);
+        const nudged = { ...region, latitude: region.latitude + 0.01 };
+        expect(regionForMarkerQuery(region, nudged)).toBe(region);
+        const panned = { ...region, latitude: region.latitude + 0.1 };
+        expect(regionForMarkerQuery(region, panned)).toBe(panned);
     });
 
     it('keeps an existing pin at its index when a new pin would sort before it', () => {

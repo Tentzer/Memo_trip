@@ -22,6 +22,9 @@ import { Marker } from 'react-native-maps';
 
 void ensureMarkerIconFonts();
 
+const MARKER_ANCHOR = { x: 0.5, y: 1 };
+const MARKER_CENTER_OFFSET = { x: 0, y: 0 };
+
 type PinFrame = 'owned' | 'shared';
 type PinRing = 'owned' | 'shared' | 'mixed' | 'video';
 
@@ -68,10 +71,11 @@ function PinBody({
     const sharedFrame = frame === 'shared';
     const accent = ring === 'shared' ? SHARED_PIN_COLOR : OWNED_PIN_COLOR;
     const showPhoto = imageUri.length > 0 && phase !== 'error';
+    const showPlaceholder = phase === 'loading';
     const placeholder = pinPlaceholderAppearance(category);
     const face = (
         <View style={markerStyles.markerAvatarImage}>
-            {phase !== 'loaded' ? (
+            {showPlaceholder ? (
                 <View
                     style={[
                         StyleSheet.absoluteFill,
@@ -181,8 +185,8 @@ function MapMemoryMarkerComponent({ memory, variant, onMarkerPress }: MapMemoryM
                 onMarkerPress(memory);
             }}
             tracksViewChanges={snapshot.tracksViewChanges}
-            anchor={{ x: 0.5, y: 1 }}
-            centerOffset={{ x: 0, y: 0 }}
+            anchor={MARKER_ANCHOR}
+            centerOffset={MARKER_CENTER_OFFSET}
             accessibilityLabel={variant === 'shared' ? 'Shared memo' : 'Your memo'}
         >
             <PinBody
@@ -240,8 +244,8 @@ function MapClusterMarkerComponent({ cluster, onPress }: MapClusterMarkerProps) 
                 onPress(cluster);
             }}
             tracksViewChanges={snapshot.tracksViewChanges}
-            anchor={{ x: 0.5, y: 1 }}
-            centerOffset={{ x: 0, y: 0 }}
+            anchor={MARKER_ANCHOR}
+            centerOffset={MARKER_CENTER_OFFSET}
             accessibilityLabel={label}
         >
             <PinBody

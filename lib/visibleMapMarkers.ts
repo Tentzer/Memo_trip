@@ -2,8 +2,11 @@ import type { MapMarkerItem } from '@/lib/mapMemoryPins';
 import { zoomBucketFromLongitudeDelta } from '@/lib/mapMemoryPins';
 import type { Region } from 'react-native-maps';
 
-/** Extra viewport kept mounted so a short pan does not create and destroy markers. */
-export const MARKER_REGION_PADDING = 0.45;
+/**
+ * Extra viewport kept mounted, in screens, past each edge.
+ * One full screen means a modest zoom-out already has those pins mounted.
+ */
+export const MARKER_REGION_PADDING = 1;
 
 /**
  * Safety cap for custom Google markers. Each one is a native view plus a bitmap.
@@ -46,6 +49,25 @@ export function regionContainsMarker(
     const minLng = region.longitude - region.longitudeDelta / 2 - lngPad;
     const maxLng = region.longitude + region.longitudeDelta / 2 + lngPad;
     return latitude >= minLat && latitude <= maxLat && longitude >= minLng && longitude <= maxLng;
+}
+
+/**
+ * Zooming in keeps the wider query so those pins stay mounted.
+ * A real pan starts a new area. A small nudge keeps the previous query.
+ */
+export function regionForMarkerQuery(previous: Region | null, next: Region): Region {
+    if (!previous) return next;
+    const zoomChanged = zoomBucketFromLongitudeDelta(previous.longitudeDelta)
+        !== zoomBucketFromLongitudeDelta(next.longitudeDelta);
+    if (!zoomChanged) {
+        return shouldRefreshMarkerRegion(previous, next) ? next : previous;
+    }
+    return {
+        latitude: next.latitude,
+        longitude: next.longitude,
+        latitudeDelta: Math.max(previous.latitudeDelta, next.latitudeDelta),
+        longitudeDelta: Math.max(previous.longitudeDelta, next.longitudeDelta),
+    };
 }
 
 export function shouldRefreshMarkerRegion(previous: Region | null, next: Region): boolean {

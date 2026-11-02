@@ -1,5 +1,5 @@
 import { describe, expect, it } from '@jest/globals';
-import { clusterMapPins, createMapClusterIndex, queryMapClusters } from '@/lib/mapClusterIndex';
+import { clusterMapPins, createMapClusterIndex, previewMapMarkers, queryMapClusters } from '@/lib/mapClusterIndex';
 import { pinMarkerProps } from '@/lib/markerPinProps';
 import { markerItemKey, planMountedMarkers, reuseStableMarkerItems } from '@/lib/visibleMapMarkers';
 import {
@@ -185,7 +185,8 @@ describe('map pin clustering', () => {
         expect(cluster.cluster.hasOwned).toBe(true);
         expect(cluster.cluster.hasShared).toBe(true);
         expect(solo.pin.memory.id).toBe('c');
-        expect(cluster.cluster.latitude).toBeCloseTo((near.memory.latitude + closer.memory.latitude) / 2);
+        expect(cluster.cluster.latitude).toBe((near.memory.latitude + closer.memory.latitude) / 2);
+        expect(cluster.cluster.longitude).toBe(near.memory.longitude);
     });
 
     it('uses the same cluster for either input order', () => {
@@ -316,6 +317,25 @@ describe('map pin clustering', () => {
         expect(grouped.find((item) => item.type === 'cluster' && item.cluster.id === 'cluster:a')).toBeTruthy();
         const zoomedOut = queryMapClusters(index, region, zoom - 1, 0.45);
         expect(zoomedOut.find((item) => item.type === 'cluster' && item.cluster.id === 'cluster:a')).toBeTruthy();
+    });
+
+    it('keeps the same marker list and the original coordinate when zoom does not change membership', () => {
+        const exact = {
+            variant: 'owned' as const,
+            memory: memory('solo', { latitude: 32.123456789, longitude: 34.987654321 }),
+        };
+        const index = createMapClusterIndex([exact, far, closer, near]);
+        const wide = { latitude: origin, longitude: 34, latitudeDelta: 1, longitudeDelta: 1 };
+        const atNeighborhood = previewMapMarkers(index, wide, 15, []);
+        const stillThere = previewMapMarkers(index, wide, MAX_CLUSTER_ZOOM, atNeighborhood);
+        expect(stillThere).toBe(atNeighborhood);
+        const solo = atNeighborhood.find((item) => item.type === 'pin' && item.pin.memory.id === 'solo');
+        if (solo?.type !== 'pin') throw new Error('expected the solo pin');
+        expect(solo.pin.memory.latitude).toBe(32.123456789);
+        expect(solo.pin.memory.longitude).toBe(34.987654321);
+        expect(pinMarkerProps(solo.pin).coordinate.latitude).toBe(32.123456789);
+        expect(pinMarkerProps(solo.pin).coordinate.longitude).toBe(34.987654321);
+        expect(pinMarkerProps(solo.pin)).toBe(pinMarkerProps(solo.pin));
     });
 });
 
