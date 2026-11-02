@@ -20,6 +20,8 @@ export interface PlacePrediction {
     phone?: string;
     website?: string;
     hours?: string;
+    /** Present on Brave search rows. Not shown in the dropdown. */
+    placePhotos?: PlacePhoto[];
 }
 
 export interface PlaceDetails {

@@ -95,6 +95,15 @@ function formatHours(hours: BravePlaceResult['opening_hours']): string | undefin
     return label ? `${label}: ${ranges}` : ranges;
 }
 
+function bravePlacePhotos(result: BravePlaceResult): PlacePhoto[] {
+    const fromPictures = mapBravePlacePhotos(result.pictures?.results);
+    if (fromPictures.length) return fromPictures;
+    const thumb = result.thumbnail?.src?.trim() ?? '';
+    const full = result.thumbnail?.original?.trim() || thumb;
+    if (!thumb || !full) return [];
+    return [{ thumb, full }];
+}
+
 function photoUrls(result: BravePlaceResult): string[] {
     const fromPictures = (result.pictures?.results ?? [])
         .filter((picture) => picture.src && !picture.logo && !picture.duplicated)
@@ -162,7 +171,7 @@ export function mapBravePlace(result: BravePlaceResult): MappedBravePlace | null
         website,
         hours: formatHours(result.opening_hours),
         photoUrls: photoUrls(result),
-        placePhotos: mapBravePlacePhotos(result.pictures?.results),
+        placePhotos: bravePlacePhotos(result),
     };
 }
 
@@ -191,5 +200,6 @@ export function predictionFromBravePlace(place: MappedBravePlace) {
         phone: place.phone,
         website: place.website,
         hours: place.hours,
+        placePhotos: place.placePhotos,
     };
 }

@@ -2,6 +2,7 @@ import { getPlacesClient } from '@/lib/places/client';
 import { hintForPrediction } from '@/lib/places/braveProvider';
 import { placePhotoUri } from '@/lib/places/placePhoto';
 import { selectSearchedPlace } from '@/lib/places/selectPlace';
+import { coverUriFromPrediction, PLACEHOLDER_PLACE_PHOTO, resolveSearchCoverUri } from '@/lib/places/saveSearchedPlace';
 import { resolvePlaceCountry } from '@/lib/googlePlaces';
 import { PLACE_SEARCH_DEBOUNCE_MS } from '@/lib/places/providerName';
 import type { PlacePrediction } from '@/lib/places/types';
@@ -122,6 +123,7 @@ export const useMapLogic = (
     const searchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const searchSeqRef = useRef(0);
     const selectionSeqRef = useRef(0);
+    const selectedPredictionRef = useRef<PlacePrediction | null>(null);
     const promptedPlaceSignInRef = useRef(false);
 
     const { user } = useAuth();
@@ -219,10 +221,11 @@ export const useMapLogic = (
         title: string,
         query: string,
         category: MemoryPlaceCategory | undefined,
+        coverUri: string | null,
     ) => {
         setSelectedPlaceTitle(title);
         setSelectedPlaceCategory(category);
-        setSelectedPlacePhotoRef(null);
+        setSelectedPlacePhotoRef(coverUri);
         setSelectedPlaceCountry(null);
         setShowRoute(false);
         setDestinationLatitude(latitude);
@@ -238,12 +241,14 @@ export const useMapLogic = (
         const seq = ++selectionSeqRef.current;
         const selected = selectSearchedPlace(prediction);
         if (selected) {
+            selectedPredictionRef.current = prediction;
             showSelectedPlace(
                 selected.latitude,
                 selected.longitude,
                 selected.title,
                 selected.query,
                 selected.category,
+                coverUriFromPrediction(prediction),
             );
             const placeId = selected.placeId;
             void (async () => {
@@ -272,12 +277,14 @@ export const useMapLogic = (
                 const client = getPlacesClient();
                 const place = await client.details(prediction.place_id, hint);
                 if (selectionSeqRef.current !== seq || !place) return;
+                selectedPredictionRef.current = prediction;
                 showSelectedPlace(
                     place.latitude,
                     place.longitude,
                     place.title,
                     prediction.description,
                     place.category ?? prediction.category,
+                    coverUriFromPrediction(prediction) ?? place.photoReference,
                 );
                 setSelectedPlaceCountry(place.country);
                 const photos = await client.photos(prediction.place_id, hint);
@@ -394,8 +401,14 @@ export const useMapLogic = (
             return;
         }
 
-        const PLACEHOLDER_URL = 'https://placehold.co/400x400/e2e8f0/94a3b8.png?text=?';
-        const photoUri = placePhotoUri(selectedPlacePhotoRef, GOOGLE_API_KEY) ?? PLACEHOLDER_URL;
+        const prediction = selectedPredictionRef.current;
+        const readyCover = placePhotoUri(selectedPlacePhotoRef, GOOGLE_API_KEY);
+        const photoUri = readyCover
+            ?? (prediction
+                ? await resolveSearchCoverUri(prediction, (row) => (
+                    getPlacesClient().photos(row.place_id, hintForPrediction(row))
+                ))
+                : PLACEHOLDER_PLACE_PHOTO);
 
         const country = selectedPlaceCountry ?? '';
         const lat = destinationLatitude;
@@ -432,13 +445,8 @@ export const useMapLogic = (
     ]);
 
     const addSelectedPlaceAsMemory = useCallback(async () => {
-        if (!selectedPlacePhotoRef) {
-            setMissingPhotoDescription('');
-            setIsNoPhotoDescriptionVisible(true);
-            return;
-        }
         await saveSelectedPlaceMemory();
-    }, [selectedPlacePhotoRef, saveSelectedPlaceMemory]);
+    }, [saveSelectedPlaceMemory]);
 
     const closeNoPhotoDescriptionPrompt = useCallback(() => {
         setIsNoPhotoDescriptionVisible(false);
