@@ -62,9 +62,9 @@ export default function MapScreen() {
     const [invitesVisible, setInvitesVisible] = useState(false);
     const [isMapReady, setIsMapReady] = useState(false);
     const processedFolderFilterRef = useRef<string | null>(null);
-    const openMemoActionsRef = useRef<(memory: Memory) => void>(() => {});
+    const openMemoInfoRef = useRef<(memory: Memory) => void>(() => {});
     const handleMarkerAction = useCallback((memory: Memory) => {
-        openMemoActionsRef.current(memory);
+        openMemoInfoRef.current(memory);
     }, []);
 
     const mapCurtainOpacity = useSharedValue(1);
@@ -79,7 +79,7 @@ export default function MapScreen() {
         isAddingPlace, isNoPhotoDescriptionVisible, missingPhotoDescription,
         setShowMemories, setSearchQuery, setMapMoved, fetchPlaces, handleSelectPlace, setShareRecipient,
         getPlaceRoute, openDrivingInWaze, handleMarkerPress, returnToStartingPoint,
-        setIsShareMemoryVisible, setMemoryToShare,
+        setIsShareMemoryVisible,
         setShowRoute, setShowSearchBar, setUserChoseAddress, setRouteDistance,
         setDestinationLongitude, setDestinationLatitude, setIsGalleryVisible, setIsCountryLibraryVisible,
         jumpToLocation, handleClearSearch, addSelectedPlaceAsMemory,
@@ -115,34 +115,23 @@ export default function MapScreen() {
 
     const {
         isInfoModalVisible,
-        actionSheetMemory,
         selectedMemoryForInfo,
-        selectedMemoryForActions,
-        openMemoActions,
-        closeMemoActions,
+        openMemoInfo,
         closeMemoInfo,
         handleSaveMemoInfo,
-        handleOpenInfoFromActions,
         handleWalkToMemo,
         handleDriveToMemo,
-        handleShareMemoFromActions,
-        handleDeleteMemoFromActions,
     } = useHomeMemoActions({
         memories,
         sharedLibraryMemories,
-        user: auth.user,
         updateMemoryInfo,
-        deleteMemory,
         returnToStartingPoint,
         getPlaceRoute,
         openDrivingInWaze,
         setShowSearchBar,
         setShowRoute,
-        setMemoryToShare,
-        setShareRecipient,
-        setIsShareMemoryVisible,
     });
-    openMemoActionsRef.current = openMemoActions;
+    openMemoInfoRef.current = openMemoInfo;
 
     const handleOpenSettings = useCallback(() => {
         Keyboard.dismiss();
@@ -432,14 +421,8 @@ export default function MapScreen() {
             <HomeOverlayModals
                 userId={auth.user?.id}
                 isSignedIn={Boolean(auth.user)}
-                actionSheetMemory={actionSheetMemory}
-                selectedMemoryForActions={selectedMemoryForActions}
-                onCloseActions={closeMemoActions}
-                onOpenInfoFromActions={handleOpenInfoFromActions}
-                onStartWalkingRoute={() => { void handleWalkToMemo(); }}
-                onOpenDrivingRoute={handleDriveToMemo}
-                onShareFromActions={handleShareMemoFromActions}
-                onDeleteFromActions={handleDeleteMemoFromActions}
+                onWalkFromInfo={() => { void handleWalkToMemo(); }}
+                onDriveFromInfo={handleDriveToMemo}
                 isInfoModalVisible={isInfoModalVisible}
                 selectedMemoryForInfo={selectedMemoryForInfo}
                 onCloseInfo={closeMemoInfo}

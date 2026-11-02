@@ -32,9 +32,19 @@ interface Props {
     readOnly?: boolean;
     onClose: () => void;
     onSave: (title: string, description: string) => void;
+    onWalk?: () => void;
+    onDrive?: () => void;
 }
 
-export default function MemoInfoModal({ visible, memory, readOnly = false, onClose, onSave }: Props) {
+export default function MemoInfoModal({
+    visible,
+    memory,
+    readOnly = false,
+    onClose,
+    onSave,
+    onWalk,
+    onDrive,
+}: Props) {
     const { theme } = useAppTheme();
     const styles = useMemo(() => createStyles(theme.colors), [theme.colors]);
     const scrollRef = useRef<ScrollView>(null);
@@ -219,6 +229,34 @@ export default function MemoInfoModal({ visible, memory, readOnly = false, onClo
                             )}
                             {memory ? (
                                 <View style={styles.actionRow}>
+                                    {onWalk ? (
+                                        <TouchableOpacity
+                                            onPress={() => {
+                                                Keyboard.dismiss();
+                                                onWalk();
+                                            }}
+                                            style={styles.googleButton}
+                                            accessibilityRole="button"
+                                            accessibilityLabel="Walk"
+                                        >
+                                            <Ionicons name="walk-outline" size={15} color={theme.colors.accent} />
+                                            <Text style={styles.routeButtonText}>Walk</Text>
+                                        </TouchableOpacity>
+                                    ) : null}
+                                    {onDrive ? (
+                                        <TouchableOpacity
+                                            onPress={() => {
+                                                Keyboard.dismiss();
+                                                onDrive();
+                                            }}
+                                            style={styles.googleButton}
+                                            accessibilityRole="button"
+                                            accessibilityLabel="Drive"
+                                        >
+                                            <Ionicons name="car-outline" size={15} color={theme.colors.accent} />
+                                            <Text style={styles.routeButtonText}>Drive</Text>
+                                        </TouchableOpacity>
+                                    ) : null}
                                     <TouchableOpacity
                                         onPress={handleOpenGoogleMaps}
                                         style={styles.googleButton}
@@ -431,6 +469,11 @@ const createStyles = (colors: ThemeColors) => StyleSheet.create({
     googleButtonText: {
         fontSize: 13,
         fontWeight: '700',
+    },
+    routeButtonText: {
+        fontSize: 13,
+        fontWeight: '700',
+        color: colors.text,
     },
     googleMapsText: {
         color: colors.textSecondary,
