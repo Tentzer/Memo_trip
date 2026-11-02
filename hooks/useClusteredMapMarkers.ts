@@ -1,8 +1,10 @@
 import { latitudeForMarkerViewportCenter } from '@/lib/mapCamera';
 import {
+    createMapClusterIndex,
+    queryMapClusters,
+} from '@/lib/mapClusterIndex';
+import {
     CLUSTER_ZOOM_SETTLE_MS,
-    MAX_CLUSTER_ZOOM,
-    clusterMapPins,
     commitSettledClusterZoom,
     createClusterZoomGate,
     longitudeDeltaForZoom,
@@ -10,11 +12,13 @@ import {
     pinImageUri,
     toMapMemoryPins,
     zoomBucketFromLongitudeDelta,
+    zoomFromLongitudeDelta,
     type MapMarkerItem,
     type MapPinCluster,
 } from '@/lib/mapMemoryPins';
 import {
     MARKER_MOUNT_BATCH,
+    MARKER_REGION_PADDING,
     nextMarkerMountCount,
     selectVisibleMarkers,
     shouldRefreshMarkerRegion,
@@ -38,8 +42,6 @@ type UseClusteredMapMarkersArgs = {
     revealMemoriesIncrementally: () => void;
     finishMemoriesMapLoad: () => void;
     mapRef: MapRef;
-    insetsTop: number;
-    tabBarHeight: number;
 };
 
 export function useClusteredMapMarkers({
@@ -50,8 +52,6 @@ export function useClusteredMapMarkers({
     revealMemoriesIncrementally,
     finishMemoriesMapLoad,
     mapRef,
-    insetsTop,
-    tabBarHeight,
 }: UseClusteredMapMarkersArgs): {
     markerItemsToRender: MapMarkerItem[];
     handleRegionChangeComplete: (region: Region) => void;
@@ -85,10 +85,14 @@ export function useClusteredMapMarkers({
         () => toMapMemoryPins(ownedMemories, sharedMemories),
         [ownedMemories, sharedMemories],
     );
-    const clusteredMarkers = useMemo(
-        () => clusterMapPins(mapMemoryPins, clusterZoom),
-        [mapMemoryPins, clusterZoom],
+    const clusterIndex = useMemo(
+        () => createMapClusterIndex(mapMemoryPins),
+        [mapMemoryPins],
     );
+    const clusteredMarkers = useMemo(() => {
+        if (!markerRegion) return [];
+        return queryMapClusters(clusterIndex, markerRegion, clusterZoom, MARKER_REGION_PADDING);
+    }, [clusterIndex, markerRegion, clusterZoom]);
     const visibleMarkers = useMemo(
         () => selectVisibleMarkers(clusteredMarkers, markerRegion),
         [clusteredMarkers, markerRegion],
@@ -196,40 +200,19 @@ export function useClusteredMapMarkers({
     }, [clearSettleTimer]);
 
     const handleClusterPress = useCallback((cluster: MapPinCluster) => {
-        const coordinates = cluster.members.map((member) => ({
-            latitude: member.memory.latitude,
-            longitude: member.memory.longitude,
-        }));
-        if (coordinates.length === 0) return;
-
-        const fitDelta = longitudeDeltaForZoom(MAX_CLUSTER_ZOOM);
-        const latitudes = coordinates.map((coordinate) => coordinate.latitude);
-        const longitudes = coordinates.map((coordinate) => coordinate.longitude);
-        const latSpan = Math.max(...latitudes) - Math.min(...latitudes);
-        const lngSpan = Math.max(...longitudes) - Math.min(...longitudes);
-        const currentZoom = zoomBucketFromLongitudeDelta(mapRegionRef.current.longitudeDelta);
-        const showMembers = currentZoom >= MAX_CLUSTER_ZOOM || (latSpan <= fitDelta && lngSpan <= fitDelta);
-
-        if (showMembers) {
-            mapRef.current?.animateToRegion({
-                latitude: latitudeForMarkerViewportCenter(cluster.latitude, fitDelta),
-                longitude: cluster.longitude,
-                latitudeDelta: fitDelta,
-                longitudeDelta: fitDelta,
-            }, 500);
-            return;
-        }
-
-        mapRef.current?.fitToCoordinates(coordinates, {
-            edgePadding: {
-                top: insetsTop + 96,
-                right: 56,
-                bottom: tabBarHeight + 96,
-                left: 56,
-            },
-            animated: true,
-        });
-    }, [insetsTop, mapRef, tabBarHeight]);
+        const currentZoom = zoomFromLongitudeDelta(mapRegionRef.current.longitudeDelta);
+        let targetZoom = cluster.expansionZoom;
+        if (!Number.isFinite(targetZoom)) targetZoom = currentZoom + 1;
+        if (targetZoom <= currentZoom) targetZoom = Math.floor(currentZoom) + 1;
+        targetZoom = Math.min(20, targetZoom);
+        const longitudeDelta = longitudeDeltaForZoom(targetZoom);
+        mapRef.current?.animateToRegion({
+            latitude: latitudeForMarkerViewportCenter(cluster.latitude, longitudeDelta),
+            longitude: cluster.longitude,
+            latitudeDelta: longitudeDelta,
+            longitudeDelta,
+        }, 500);
+    }, [mapRef]);
 
     return { markerItemsToRender, handleRegionChangeComplete, handleClusterPress };
 }

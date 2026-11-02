@@ -168,8 +168,6 @@ export default function MapScreen() {
         revealMemoriesIncrementally,
         finishMemoriesMapLoad,
         mapRef,
-        insetsTop: insets.top,
-        tabBarHeight,
     });
 
     const handleRoutePress = useCallback(() => {

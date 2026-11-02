@@ -1,9 +1,9 @@
 import { describe, expect, it } from '@jest/globals';
+import { clusterMapPins, createMapClusterIndex, queryMapClusters } from '@/lib/mapClusterIndex';
 import {
     CLUSTER_ZOOM_SETTLE_MS,
     CLUSTER_RADIUS_PX,
     MAX_CLUSTER_ZOOM,
-    clusterMapPins,
     clusterRadiusMeters,
     commitSettledClusterZoom,
     createClusterZoomGate,
@@ -229,23 +229,51 @@ describe('map pin clustering', () => {
         expect(formatClusterCount(100)).toBe('99+');
     });
 
-    it('keeps the anchor id when a farther memory joins the cluster', () => {
+    it('keeps a stable cluster id for the same points and zoom', () => {
         const radius = clusterRadiusMeters(zoom);
         const anchor = pin('a', origin, 'owned', '2026-01-01T00:00:00.000Z');
         const neighbor = pin('b', northOf(origin, radius * 0.4), 'shared', '2026-04-01T00:00:00.000Z');
         const farther = pin('c', northOf(origin, radius * 3.2), 'owned', '2026-02-01T00:00:00.000Z');
-        const tight = clusterMapPins([farther, neighbor, anchor], zoom);
-        const wide = clusterMapPins([neighbor, farther, anchor], zoom - 2);
-        const tightCluster = tight.find((item) => item.type === 'cluster');
-        const wideCluster = wide.find((item) => item.type === 'cluster');
-        if (tightCluster?.type !== 'cluster' || wideCluster?.type !== 'cluster') {
+        const first = clusterMapPins([farther, neighbor, anchor], zoom);
+        const second = clusterMapPins([neighbor, farther, anchor], zoom);
+        const firstCluster = first.find((item) => item.type === 'cluster');
+        const secondCluster = second.find((item) => item.type === 'cluster');
+        if (firstCluster?.type !== 'cluster' || secondCluster?.type !== 'cluster') {
             throw new Error('expected clusters');
         }
-        expect(tightCluster.cluster.id).toBe('cluster:a');
-        expect(wideCluster.cluster.id).toBe('cluster:a');
-        expect(tightCluster.cluster.count).toBe(2);
-        expect(wideCluster.cluster.count).toBe(3);
-        expect(tight.filter((item) => item.type === 'pin')).toHaveLength(1);
+        expect(firstCluster.cluster.id).toMatch(/^cluster:\d+$/);
+        expect(secondCluster.cluster.id).toBe(firstCluster.cluster.id);
+        expect(firstCluster.cluster.count).toBe(2);
+        expect(first.filter((item) => item.type === 'pin')).toHaveLength(1);
+        expect(firstCluster.cluster.expansionZoom).toBeGreaterThan(zoom);
+        expect(firstCluster.cluster.expansionZoom).toBeLessThanOrEqual(MAX_CLUSTER_ZOOM);
+    });
+
+    it('queries one index by bbox and stops clustering at neighborhood zoom', () => {
+        const index = createMapClusterIndex([far, closer, near]);
+        const region = {
+            latitude: origin,
+            longitude: 34,
+            latitudeDelta: 0.02,
+            longitudeDelta: 0.02,
+        };
+        const nearby = queryMapClusters(index, region, zoom, 0.45);
+        const again = queryMapClusters(index, region, zoom, 0.45);
+        expect(again).toEqual(nearby);
+        expect(nearby).toHaveLength(1);
+        expect(nearby[0]?.type).toBe('cluster');
+        if (nearby[0]?.type !== 'cluster') throw new Error('expected a cluster');
+        expect(nearby[0].cluster.members.map((member) => member.memory.id)).toEqual(['a', 'b']);
+        expect(nearby[0].cluster.expansionZoom).toBe(MAX_CLUSTER_ZOOM);
+        const zoomedIn = queryMapClusters(index, region, MAX_CLUSTER_ZOOM, 0.45);
+        expect(zoomedIn.map((item) => item.type)).toEqual(['pin', 'pin']);
+        const wide = queryMapClusters(index, {
+            latitude: origin,
+            longitude: 34,
+            latitudeDelta: 1,
+            longitudeDelta: 1,
+        }, zoom, 0);
+        expect(memberCount(wide)).toBe(3);
     });
 });
 
