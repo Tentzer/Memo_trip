@@ -104,6 +104,15 @@ function photoUrls(result: BravePlaceResult): string[] {
     return thumb ? [thumb] : [];
 }
 
+function finiteCoordinate(value: unknown): number | null {
+    if (typeof value === 'number' && Number.isFinite(value)) return value;
+    if (typeof value === 'string' && value.trim()) {
+        const parsed = Number(value);
+        if (Number.isFinite(parsed)) return parsed;
+    }
+    return null;
+}
+
 function ratingOutOfFive(rating: BravePlaceResult['rating']): { value: number; count: number } {
     const count = typeof rating?.reviewCount === 'number' && rating.reviewCount > 0
         ? Math.round(rating.reviewCount)
@@ -120,10 +129,9 @@ function ratingOutOfFive(rating: BravePlaceResult['rating']): { value: number; c
 export function mapBravePlace(result: BravePlaceResult): MappedBravePlace | null {
     const name = result.title?.trim() ?? '';
     const coordinates = result.coordinates;
-    const latitude = coordinates?.[0];
-    const longitude = coordinates?.[1];
-    if (!name || typeof latitude !== 'number' || typeof longitude !== 'number') return null;
-    if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return null;
+    const latitude = finiteCoordinate(coordinates?.[0]);
+    const longitude = finiteCoordinate(coordinates?.[1]);
+    if (!name || latitude == null || longitude == null) return null;
 
     const address = result.postal_address?.displayAddress?.trim() ?? '';
     const typeLabel = result.description?.trim() ?? '';

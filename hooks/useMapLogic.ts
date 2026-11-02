@@ -1,6 +1,8 @@
 import { getPlacesClient } from '@/lib/places/client';
 import { hintForPrediction } from '@/lib/places/braveProvider';
 import { placePhotoUri } from '@/lib/places/placePhoto';
+import { selectSearchedPlace } from '@/lib/places/selectPlace';
+import { resolvePlaceCountry } from '@/lib/googlePlaces';
 import { PLACE_SEARCH_DEBOUNCE_MS } from '@/lib/places/providerName';
 import type { PlacePrediction } from '@/lib/places/types';
 import type { MemoryPlaceCategory } from '@/types/memory';
@@ -119,6 +121,7 @@ export const useMapLogic = (
     const [selectedPlaceCategory, setSelectedPlaceCategory] = useState<MemoryPlaceCategory | undefined>(undefined);
     const searchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const searchSeqRef = useRef(0);
+    const selectionSeqRef = useRef(0);
     const promptedPlaceSignInRef = useRef(false);
 
     const { user } = useAuth();
@@ -210,31 +213,81 @@ export const useMapLogic = (
         }, PLACE_SEARCH_DEBOUNCE_MS);
     }, []);
 
-    const handleSelectPlace = useCallback(async (prediction: PlacePrediction) => {
-        try {
-            const hint = hintForPrediction(prediction);
-            const client = getPlacesClient();
-            const place = await client.details(prediction.place_id, hint);
-            if (!place) return;
-
-            const photos = await client.photos(prediction.place_id, hint);
-            setSelectedPlaceTitle(place.title);
-            setSelectedPlacePhotoRef(photos[0] ?? null);
-            setSelectedPlaceCountry(place.country);
-            setSelectedPlaceCategory(place.category ?? prediction.category);
-            setShowRoute(false);
-            setDestinationLatitude(place.latitude);
-            setDestinationLongitude(place.longitude);
-            setSearchResults([]);
-            setSearchQuery(prediction.description);
-            setUserChoseAddress(true);
-            Keyboard.dismiss();
-
-            animateMapTo(place.latitude, place.longitude, USER_MAP_ZOOM_DELTA, 'memo-pin');
-        } catch (error) {
-            console.log(error);
-        }
+    const showSelectedPlace = useCallback((
+        latitude: number,
+        longitude: number,
+        title: string,
+        query: string,
+        category: MemoryPlaceCategory | undefined,
+    ) => {
+        setSelectedPlaceTitle(title);
+        setSelectedPlaceCategory(category);
+        setSelectedPlacePhotoRef(null);
+        setSelectedPlaceCountry(null);
+        setShowRoute(false);
+        setDestinationLatitude(latitude);
+        setDestinationLongitude(longitude);
+        setSearchResults([]);
+        setSearchQuery(query);
+        setUserChoseAddress(true);
+        Keyboard.dismiss();
+        animateMapTo(latitude, longitude, USER_MAP_ZOOM_DELTA, 'memo-pin');
     }, [animateMapTo]);
+
+    const handleSelectPlace = useCallback((prediction: PlacePrediction) => {
+        const seq = ++selectionSeqRef.current;
+        const selected = selectSearchedPlace(prediction);
+        if (selected) {
+            showSelectedPlace(
+                selected.latitude,
+                selected.longitude,
+                selected.title,
+                selected.query,
+                selected.category,
+            );
+            const placeId = selected.placeId;
+            void (async () => {
+                try {
+                    const country = await resolvePlaceCountry(
+                        selected.latitude,
+                        selected.longitude,
+                        undefined,
+                        GOOGLE_API_KEY,
+                    );
+                    if (selectionSeqRef.current !== seq) return;
+                    if (country) setSelectedPlaceCountry(country);
+                    const photos = await getPlacesClient().photos(placeId, hintForPrediction(prediction));
+                    if (selectionSeqRef.current !== seq) return;
+                    if (photos[0]) setSelectedPlacePhotoRef(photos[0]);
+                } catch (error) {
+                    console.log(error);
+                }
+            })();
+            return;
+        }
+
+        void (async () => {
+            try {
+                const hint = hintForPrediction(prediction);
+                const client = getPlacesClient();
+                const place = await client.details(prediction.place_id, hint);
+                if (selectionSeqRef.current !== seq || !place) return;
+                showSelectedPlace(
+                    place.latitude,
+                    place.longitude,
+                    place.title,
+                    prediction.description,
+                    place.category ?? prediction.category,
+                );
+                setSelectedPlaceCountry(place.country);
+                const photos = await client.photos(prediction.place_id, hint);
+                if (selectionSeqRef.current !== seq) return;
+                if (photos[0]) setSelectedPlacePhotoRef(photos[0]);
+            } catch (error) {
+                console.log(error);
+            }
+        })();
+    }, [GOOGLE_API_KEY, showSelectedPlace]);
 
     const getPlaceRoute = useCallback(async (lat?: number, lng?: number): Promise<boolean> => {
         if (!location?.coords) {
