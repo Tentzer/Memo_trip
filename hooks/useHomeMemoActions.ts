@@ -1,29 +1,44 @@
+import { alertRequireSignIn } from '@/lib/requireSignInAlert';
 import type { Memory } from '@/types/memory';
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useMemo, useRef, useState } from 'react';
+import { Alert, Platform } from 'react-native';
+
+type SignedInUser = { id: string } | null;
 
 type UseHomeMemoActionsArgs = {
     memories: Memory[];
     sharedLibraryMemories: Memory[];
+    user: SignedInUser;
     updateMemoryInfo: (memoryId: string, title: string, description: string) => Promise<void>;
+    deleteMemory: (id: string) => void;
     returnToStartingPoint: (options?: { forceRefresh?: boolean }) => Promise<unknown>;
     getPlaceRoute: (lat?: number, lng?: number) => Promise<boolean>;
     openDrivingInWaze: (lat?: number, lng?: number) => Promise<unknown>;
     setShowSearchBar: (value: boolean) => void;
     setShowRoute: (value: boolean) => void;
+    setMemoryToShare: (memory: Memory | null) => void;
+    setShareRecipient: (value: string) => void;
+    setIsShareMemoryVisible: (value: boolean) => void;
 };
 
 export function useHomeMemoActions({
     memories,
     sharedLibraryMemories,
+    user,
     updateMemoryInfo,
+    deleteMemory,
     returnToStartingPoint,
     getPlaceRoute,
     openDrivingInWaze,
     setShowSearchBar,
     setShowRoute,
+    setMemoryToShare,
+    setShareRecipient,
+    setIsShareMemoryVisible,
 }: UseHomeMemoActionsArgs) {
     const [isInfoModalVisible, setIsInfoModalVisible] = useState(false);
     const [selectedMemoryForInfoId, setSelectedMemoryForInfoId] = useState<string | null>(null);
+    const pendingShareRef = useRef(false);
 
     const selectedMemoryForInfo = useMemo(() => {
         if (!selectedMemoryForInfoId) return null;
@@ -69,6 +84,54 @@ export function useHomeMemoActions({
         void openDrivingInWaze(target.latitude, target.longitude);
     }, [closeMemoInfo, openDrivingInWaze, selectedMemoryForInfo]);
 
+    const handleShareMemo = useCallback(() => {
+        if (!selectedMemoryForInfo || selectedMemoryForInfo.isShared) return;
+        if (!user) {
+            alertRequireSignIn('Sign in to share this memo.');
+            return;
+        }
+        const target = selectedMemoryForInfo;
+        setMemoryToShare(target);
+        setShareRecipient('');
+        pendingShareRef.current = true;
+        closeMemoInfo();
+        if (Platform.OS !== 'ios') {
+            pendingShareRef.current = false;
+            setIsShareMemoryVisible(true);
+        }
+    }, [
+        closeMemoInfo,
+        selectedMemoryForInfo,
+        setIsShareMemoryVisible,
+        setMemoryToShare,
+        setShareRecipient,
+        user,
+    ]);
+
+    const handleDeleteMemo = useCallback(() => {
+        if (!selectedMemoryForInfo || selectedMemoryForInfo.isShared) return;
+        const target = selectedMemoryForInfo;
+        closeMemoInfo();
+        Alert.alert(
+            'Archive memo',
+            'This removes the memo from your main map and country folders, but keeps it available in any libraries that still include it.',
+            [
+                { text: 'Cancel', style: 'cancel' },
+                {
+                    text: 'Delete',
+                    style: 'destructive',
+                    onPress: () => deleteMemory(target.id),
+                },
+            ],
+        );
+    }, [closeMemoInfo, deleteMemory, selectedMemoryForInfo]);
+
+    const handleInfoModalDismissed = useCallback(() => {
+        if (!pendingShareRef.current) return;
+        pendingShareRef.current = false;
+        setIsShareMemoryVisible(true);
+    }, [setIsShareMemoryVisible]);
+
     return {
         isInfoModalVisible,
         selectedMemoryForInfo,
@@ -77,5 +140,8 @@ export function useHomeMemoActions({
         handleSaveMemoInfo,
         handleWalkToMemo,
         handleDriveToMemo,
+        handleShareMemo,
+        handleDeleteMemo,
+        handleInfoModalDismissed,
     };
 }

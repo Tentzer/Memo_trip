@@ -15,6 +15,9 @@ type HomeOverlayModalsProps = {
     isSignedIn: boolean;
     onWalkFromInfo: () => void;
     onDriveFromInfo: () => void;
+    onShareFromInfo: () => void;
+    onDeleteFromInfo: () => void;
+    onInfoDismissed: () => void;
     isInfoModalVisible: boolean;
     selectedMemoryForInfo: Memory | null;
     onCloseInfo: () => void;
@@ -54,6 +57,9 @@ export default function HomeOverlayModals({
     isSignedIn,
     onWalkFromInfo,
     onDriveFromInfo,
+    onShareFromInfo,
+    onDeleteFromInfo,
+    onInfoDismissed,
     isInfoModalVisible,
     selectedMemoryForInfo,
     onCloseInfo,
@@ -99,6 +105,9 @@ export default function HomeOverlayModals({
                 onSave={onSaveInfo}
                 onWalk={onWalkFromInfo}
                 onDrive={onDriveFromInfo}
+                onShare={onShareFromInfo}
+                onDelete={onDeleteFromInfo}
+                onDismiss={onInfoDismissed}
             />
 
             <ShareMemoryModal

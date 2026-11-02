@@ -79,7 +79,7 @@ export default function MapScreen() {
         isAddingPlace, isNoPhotoDescriptionVisible, missingPhotoDescription,
         setShowMemories, setSearchQuery, setMapMoved, fetchPlaces, handleSelectPlace, setShareRecipient,
         getPlaceRoute, openDrivingInWaze, handleMarkerPress, returnToStartingPoint,
-        setIsShareMemoryVisible,
+        setIsShareMemoryVisible, setMemoryToShare,
         setShowRoute, setShowSearchBar, setUserChoseAddress, setRouteDistance,
         setDestinationLongitude, setDestinationLatitude, setIsGalleryVisible, setIsCountryLibraryVisible,
         jumpToLocation, handleClearSearch, addSelectedPlaceAsMemory,
@@ -121,15 +121,23 @@ export default function MapScreen() {
         handleSaveMemoInfo,
         handleWalkToMemo,
         handleDriveToMemo,
+        handleShareMemo,
+        handleDeleteMemo,
+        handleInfoModalDismissed,
     } = useHomeMemoActions({
         memories,
         sharedLibraryMemories,
+        user: auth.user,
         updateMemoryInfo,
+        deleteMemory,
         returnToStartingPoint,
         getPlaceRoute,
         openDrivingInWaze,
         setShowSearchBar,
         setShowRoute,
+        setMemoryToShare,
+        setShareRecipient,
+        setIsShareMemoryVisible,
     });
     openMemoInfoRef.current = openMemoInfo;
 
@@ -423,6 +431,9 @@ export default function MapScreen() {
                 isSignedIn={Boolean(auth.user)}
                 onWalkFromInfo={() => { void handleWalkToMemo(); }}
                 onDriveFromInfo={handleDriveToMemo}
+                onShareFromInfo={handleShareMemo}
+                onDeleteFromInfo={handleDeleteMemo}
+                onInfoDismissed={handleInfoModalDismissed}
                 isInfoModalVisible={isInfoModalVisible}
                 selectedMemoryForInfo={selectedMemoryForInfo}
                 onCloseInfo={closeMemoInfo}

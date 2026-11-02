@@ -34,6 +34,9 @@ interface Props {
     onSave: (title: string, description: string) => void;
     onWalk?: () => void;
     onDrive?: () => void;
+    onShare?: () => void;
+    onDelete?: () => void;
+    onDismiss?: () => void;
 }
 
 export default function MemoInfoModal({
@@ -44,6 +47,9 @@ export default function MemoInfoModal({
     onSave,
     onWalk,
     onDrive,
+    onShare,
+    onDelete,
+    onDismiss,
 }: Props) {
     const { theme } = useAppTheme();
     const styles = useMemo(() => createStyles(theme.colors), [theme.colors]);
@@ -189,6 +195,7 @@ export default function MemoInfoModal({
             transparent={true}
             animationType="slide"
             onRequestClose={handleClose}
+            onDismiss={onDismiss}
         >
             <View style={styles.overlay}>
                 <Pressable style={styles.backdropTap} onPress={handleClose} accessibilityRole="button" accessibilityLabel="Close" />
@@ -267,6 +274,34 @@ export default function MemoInfoModal({
                                             <Text style={styles.googleMapsText}> Maps</Text>
                                         </Text>
                                     </TouchableOpacity>
+                                    {!memory.isShared && onShare ? (
+                                        <TouchableOpacity
+                                            onPress={() => {
+                                                Keyboard.dismiss();
+                                                onShare();
+                                            }}
+                                            style={styles.googleButton}
+                                            accessibilityRole="button"
+                                            accessibilityLabel="Share"
+                                        >
+                                            <Ionicons name="share-social-outline" size={15} color={theme.colors.accent} />
+                                            <Text style={styles.routeButtonText}>Share</Text>
+                                        </TouchableOpacity>
+                                    ) : null}
+                                    {!memory.isShared && onDelete ? (
+                                        <TouchableOpacity
+                                            onPress={() => {
+                                                Keyboard.dismiss();
+                                                onDelete();
+                                            }}
+                                            style={styles.deleteButton}
+                                            accessibilityRole="button"
+                                            accessibilityLabel="Delete"
+                                        >
+                                            <Ionicons name="trash-outline" size={15} color={theme.colors.danger} />
+                                            <Text style={styles.deleteButtonText}>Delete</Text>
+                                        </TouchableOpacity>
+                                    ) : null}
                                     {memory.source === 'video_import' && !!memory.sourceUrl && !!sourcePlatform && (
                                         <TouchableOpacity onPress={handleOpenSourceUrl} activeOpacity={0.8}>
                                             {sourcePlatform === 'instagram' ? (
@@ -474,6 +509,23 @@ const createStyles = (colors: ThemeColors) => StyleSheet.create({
         fontSize: 13,
         fontWeight: '700',
         color: colors.text,
+    },
+    deleteButton: {
+        borderRadius: 999,
+        backgroundColor: colors.dangerSoft,
+        borderWidth: 1,
+        borderColor: colors.danger,
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: 6,
+        paddingHorizontal: 12,
+        paddingVertical: 7,
+    },
+    deleteButtonText: {
+        fontSize: 13,
+        fontWeight: '700',
+        color: colors.danger,
     },
     googleMapsText: {
         color: colors.textSecondary,
