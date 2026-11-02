@@ -1,3 +1,4 @@
+import { isFloatingTabVisible } from '@/constants/featureFlags';
 import { useLibrariesOverlay } from '@/context/LibrariesOverlayContext';
 import { useAppTheme } from '@/context/ThemeContext';
 import {
@@ -22,7 +23,9 @@ export default function FloatingTabBar({ state, descriptors, navigation, insets 
     const onHeightChange = useContext(BottomTabBarHeightCallbackContext);
     const { theme, isDarkMode } = useAppTheme();
     const { visible: librariesOverlayVisible, sheetTranslateY, sheetTravel } = useLibrariesOverlay();
-    const routes = state.routes.filter((route) => !isHiddenTab(descriptors[route.key].options.tabBarItemStyle));
+    const routes = state.routes.filter((route) => (
+        isFloatingTabVisible(route.name) && !isHiddenTab(descriptors[route.key].options.tabBarItemStyle)
+    ));
     const barStyle = useAnimatedStyle(() => {
         const travel = Math.max(sheetTravel.value, 1);
         return {
@@ -113,6 +116,7 @@ const styles = StyleSheet.create({
         paddingHorizontal: 28,
     },
     shadow: {
+        alignSelf: 'center',
         borderRadius: PILL_HEIGHT / 2,
         shadowOffset: { width: 0, height: 8 },
         shadowOpacity: 0.16,
@@ -129,7 +133,7 @@ const styles = StyleSheet.create({
         paddingHorizontal: 4,
     },
     item: {
-        flex: 1,
+        width: 92,
         alignItems: 'center',
         justifyContent: 'center',
         gap: 2,
