@@ -88,15 +88,32 @@ describe('visible map markers', () => {
     });
 
     it('keeps a mounted pin that is still in view when nearer pins would fill the cap', () => {
-        const items = Array.from({ length: MAX_MOUNTED_MARKERS + 8 }, (_, index) =>
-            pinAt(`p${index}`, region.latitude + index * 0.001, region.longitude),
+        const farIndex = MAX_MOUNTED_MARKERS + 6;
+        const step = (region.latitudeDelta / 2) / (farIndex + 2);
+        const items = Array.from({ length: farIndex + 1 }, (_, index) =>
+            pinAt(`p${index}`, region.latitude + index * step, region.longitude),
         );
-        const farId = `p${MAX_MOUNTED_MARKERS + 6}`;
+        const farId = `p${farIndex}`;
         const selected = selectVisibleMarkers(items, region, MAX_MOUNTED_MARKERS, new Set([`owned:${farId}`]));
         expect(selected).toHaveLength(MAX_MOUNTED_MARKERS);
         expect(selected.map(markerItemKey)).toContain(`owned:${farId}`);
         const nearestOnly = selectVisibleMarkers(items, region);
         expect(nearestOnly.map(markerItemKey)).not.toContain(`owned:${farId}`);
+    });
+
+    it('keeps a pin inside the viewport when retained markers outside it fill the cap', () => {
+        const here = pinAt('here', region.latitude, region.longitude);
+        const padded = Array.from({ length: MAX_MOUNTED_MARKERS }, (_, index) =>
+            pinAt(`pad${index}`, region.latitude + region.latitudeDelta * 0.9, region.longitude),
+        );
+        const selected = selectVisibleMarkers(
+            [here, ...padded],
+            region,
+            MAX_MOUNTED_MARKERS,
+            new Set(padded.map(markerItemKey)),
+        );
+        expect(selected.map(markerItemKey)).toContain('owned:here');
+        expect(selected).toHaveLength(MAX_MOUNTED_MARKERS);
     });
 
     it('keeps a pin one screen outside the viewport and drops one farther away', () => {

@@ -9,11 +9,11 @@ import type { Region } from 'react-native-maps';
 export const MARKER_REGION_PADDING = 1;
 
 /**
- * Safety cap for custom Google markers. Each one is a native view plus a bitmap.
- * Applied after clustering, including neighborhood zooms where every pin is individual.
- * A fast zoom that mounts or destroys more than this in one frame crashes iOS.
+ * Safety cap after clustering. Bitmap markers are childless, so this can sit
+ * above the old custom-view limit. Pins inside the viewport are kept before
+ * any marker that is only in the padded ring. Newcomers still mount a few per frame.
  */
-export const MAX_MOUNTED_MARKERS = 32;
+export const MAX_MOUNTED_MARKERS = 96;
 
 /** How many custom markers to attach per frame after a zoom change. */
 export const MARKER_MOUNT_BATCH = 8;
@@ -128,6 +128,29 @@ function nearestMarkers(items: readonly MapMarkerItem[], region: Region, maxCoun
  * Keys in `retainKeys` that are still inside the padding stay mounted ahead of newcomers.
  * A null region mounts nothing so the first camera fix does not attach every memory.
  */
+function capMarkers(
+    items: readonly MapMarkerItem[],
+    region: Region,
+    maxCount: number,
+    retainKeys?: ReadonlySet<string>,
+): MapMarkerItem[] {
+    if (items.length <= maxCount) return [...items];
+    if (!retainKeys || retainKeys.size === 0) return nearestMarkers(items, region, maxCount);
+    const retained = nearestMarkers(
+        items.filter((item) => retainKeys.has(markerItemKey(item))),
+        region,
+        maxCount,
+    );
+    if (retained.length >= maxCount) return retained;
+    const retainedKeySet = new Set(retained.map((item) => markerItemKey(item)));
+    const fresh = nearestMarkers(
+        items.filter((item) => !retainedKeySet.has(markerItemKey(item))),
+        region,
+        maxCount - retained.length,
+    );
+    return [...retained, ...fresh];
+}
+
 export function selectVisibleMarkers(
     items: readonly MapMarkerItem[],
     region: Region | null,
@@ -135,25 +158,26 @@ export function selectVisibleMarkers(
     retainKeys?: ReadonlySet<string>,
 ): MapMarkerItem[] {
     if (!region) return [];
-    const visible = items.filter((item) => {
+    const inView: MapMarkerItem[] = [];
+    const around: MapMarkerItem[] = [];
+    for (const item of items) {
         const coordinate = markerCoordinate(item);
-        return regionContainsMarker(region, coordinate.latitude, coordinate.longitude);
-    });
-    if (visible.length <= maxCount) return visible;
-    if (!retainKeys || retainKeys.size === 0) return nearestMarkers(visible, region, maxCount);
-    const retained = nearestMarkers(
-        visible.filter((item) => retainKeys.has(markerItemKey(item))),
-        region,
-        maxCount,
-    );
-    if (retained.length >= maxCount) return retained;
-    const retainedKeySet = new Set(retained.map((item) => markerItemKey(item)));
-    const fresh = nearestMarkers(
-        visible.filter((item) => !retainedKeySet.has(markerItemKey(item))),
-        region,
-        maxCount - retained.length,
-    );
-    return [...retained, ...fresh];
+        if (regionContainsMarker(region, coordinate.latitude, coordinate.longitude, 0)) {
+            inView.push(item);
+        } else if (regionContainsMarker(region, coordinate.latitude, coordinate.longitude)) {
+            around.push(item);
+        }
+    }
+    if (inView.length + around.length <= maxCount) {
+        if (around.length === 0) return inView;
+        const visibleKeys = new Set([...inView, ...around].map((item) => markerItemKey(item)));
+        return items.filter((item) => visibleKeys.has(markerItemKey(item)));
+    }
+    const keptInView = capMarkers(inView, region, maxCount, retainKeys);
+    const room = maxCount - keptInView.length;
+    const keptAround = room > 0 ? capMarkers(around, region, room, retainKeys) : [];
+    const kept = new Set([...keptInView, ...keptAround].map((item) => markerItemKey(item)));
+    return items.filter((item) => kept.has(markerItemKey(item)));
 }
 
 function sameMarkerSnapshot(previous: MapMarkerItem, next: MapMarkerItem): boolean {

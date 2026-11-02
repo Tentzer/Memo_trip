@@ -23,6 +23,7 @@ describe('pin bitmap keys', () => {
             variant: 'owned' as const,
             selected: false,
             video: false,
+            fallbackImageUri: '',
         };
         const first = pinBitmapKey(base);
         expect(pinBitmapKey(base)).toBe(first);
@@ -41,6 +42,7 @@ describe('pin bitmap keys', () => {
             frame: 'owned' as const,
             ring: 'mixed' as const,
             variant: 'shared' as const,
+            fallbackImageUri: '',
         };
         expect(clusterBitmapKey(shared)).toBe(clusterBitmapKey({ ...shared, count: 250 }));
         expect(clusterBitmapKey(shared)).not.toBe(clusterBitmapKey({ ...shared, ring: 'owned' }));
@@ -55,7 +57,7 @@ describe('pin bitmap keys', () => {
         );
         expect(placeholderBitmapUri()).toBe(placeholderBitmapUri());
         expect(placeholderBitmapUri().startsWith('data:image/png;base64,')).toBe(true);
-        expect(PIN_BITMAP_PLACEHOLDER_KEY).toBe('placeholder:v2');
+        expect(PIN_BITMAP_PLACEHOLDER_KEY).toBe('placeholder:v3');
     });
 
     it('serves a cached png before the placeholder', () => {
@@ -66,6 +68,7 @@ describe('pin bitmap keys', () => {
             variant: 'shared',
             selected: false,
             video: false,
+            fallbackImageUri: '',
         });
         expect(bitmapUriForMarker(key)).toBe(placeholderBitmapUri());
         rememberPinBitmap(key, 'file:///pins/cached.png');

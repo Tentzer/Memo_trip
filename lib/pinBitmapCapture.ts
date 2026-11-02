@@ -2,6 +2,12 @@
 export const PIN_BITMAP_POINT_WIDTH = 72;
 export const PIN_BITMAP_POINT_HEIGHT = 86;
 
+/** How long to wait for a photo before trying again or capturing the ring alone. */
+export const PIN_BITMAP_CAPTURE_TIMEOUT_MS = 800;
+export const PIN_BITMAP_CAPTURE_ATTEMPTS = 2;
+/** Coalesce marker image updates so a burst of finished captures is one commit. */
+export const PIN_BITMAP_FLUSH_MS = 100;
+
 export type PinBitmapSize = {
     width: number;
     height: number;
@@ -39,6 +45,24 @@ export function pinBitmapPixelSize(screenScale: number): PinBitmapSize {
  * Point size AIRGoogleMapMarker uses for that PNG.
  * image.size is pixels divided by the scale passed to ImageLoader.
  */
+export type PinCaptureDecision = 'capture' | 'retry' | 'capture-fallback';
+
+/**
+ * Called when a photo attempt ends, either because it loaded or because it
+ * timed out or failed. A loaded photo is captured. Otherwise one retry is
+ * allowed, then the ring is captured without the photo so the queue moves on.
+ */
+export function decidePinCapture(input: {
+    attempt: number;
+    maxAttempts: number;
+    photoLoaded: boolean;
+    hasPhoto: boolean;
+}): PinCaptureDecision {
+    if (!input.hasPhoto || input.photoLoaded) return 'capture';
+    if (input.attempt < input.maxAttempts) return 'retry';
+    return 'capture-fallback';
+}
+
 export function markerPointSizeForBitmap(
     pixelWidth: number,
     pixelHeight: number,

@@ -23,6 +23,7 @@ import {
     sameMarkerList,
 } from '@/lib/visibleMapMarkers';
 import { useMapMarkerReveal } from '@/hooks/useMapMarkerReveal';
+import { setPinBitmapCapturePaused } from '@/lib/pinBitmapQueue';
 import type { Memory } from '@/types/memory';
 import { Image } from 'expo-image';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -185,10 +186,12 @@ export function useClusteredMapMarkers({
 
     const handleRegionChange = useCallback(() => {
         gestureActiveRef.current = true;
+        setPinBitmapCapturePaused(true);
     }, []);
 
     const handleRegionChangeComplete = useCallback((region: Region) => {
         gestureActiveRef.current = false;
+        setPinBitmapCapturePaused(false);
         mapRegionRef.current = region;
         const nowMs = Date.now();
         const gate = noteClusterZoomSample(zoomGateRef.current, region.longitudeDelta, nowMs);

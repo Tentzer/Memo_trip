@@ -11,7 +11,7 @@ import {
 } from '@/lib/pinBitmapKey';
 import { requestPinBitmap } from '@/lib/pinBitmapQueue';
 import type { Memory } from '@/types/memory';
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Marker } from 'react-native-maps';
 
 const MARKER_ANCHOR = { x: 0.5, y: 1 };
@@ -50,15 +50,22 @@ function useBitmapUri(spec: BitmapSpec): string {
     return uri;
 }
 
+function photoFallback(memory: Memory, imageUri: string): string {
+    const full = memory.uri?.trim() ?? '';
+    return full !== imageUri ? full : '';
+}
+
 function pinSpec(memory: Memory, variant: 'owned' | 'shared'): PinBitmapInput & { kind: 'pin' } {
+    const imageUri = pinImageUri(memory);
     return {
         kind: 'pin',
         memoryId: memory.id,
-        imageUri: pinImageUri(memory),
+        imageUri,
         badge: categoryBadgeForMapMarker({ type: 'pin', placeCategory: memory.placeCategory }),
         variant,
         selected: false,
         video: memory.source === 'video_import',
+        fallbackImageUri: photoFallback(memory, imageUri),
     };
 }
 
@@ -72,17 +79,19 @@ function clusterSpec(cluster: MapPinCluster): ClusterBitmapInput & { kind: 'clus
         frame,
         ring: mixed ? 'mixed' : frame,
         variant: cluster.newest.variant,
+        fallbackImageUri: photoFallback(cluster.newest.memory, pinImageUri(cluster.newest.memory)),
     };
 }
 
 function MapMemoryMarkerComponent({ memory, variant, onMarkerPress }: MapMemoryMarkerProps) {
     const uri = useBitmapUri(pinSpec(memory, variant));
+    const image = useMemo(() => ({ uri }), [uri]);
     const coordinate = cachedMarkerCoordinate(memory.id, memory.latitude, memory.longitude);
     return (
         <Marker
             identifier={memory.id}
             coordinate={coordinate}
-            image={{ uri }}
+            image={image}
             anchor={MARKER_ANCHOR}
             tracksViewChanges={false}
             style={MARKER_LAYOUT}
@@ -111,12 +120,13 @@ export const MapMemoryMarker = React.memo(MapMemoryMarkerComponent, sameMemoryMa
 
 function MapClusterMarkerComponent({ cluster, onPress }: MapClusterMarkerProps) {
     const uri = useBitmapUri(clusterSpec(cluster));
+    const image = useMemo(() => ({ uri }), [uri]);
     const coordinate = cachedMarkerCoordinate(cluster.id, cluster.latitude, cluster.longitude);
     return (
         <Marker
             identifier={cluster.id}
             coordinate={coordinate}
-            image={{ uri }}
+            image={image}
             anchor={MARKER_ANCHOR}
             tracksViewChanges={false}
             style={MARKER_LAYOUT}

@@ -174,5 +174,6 @@ export function placeholderArtworkProps(phase: PinPhase, onLoad: () => void, onE
         variant: 'owned',
         selected: false,
         video: false,
+        fallbackImageUri: '',
     }, phase === 'loading' ? 'error' : phase, onLoad, onError);
 }

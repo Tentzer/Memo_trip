@@ -1,8 +1,8 @@
 import { formatClusterCount } from '@/lib/mapMemoryPins';
 import type { MemoryPlaceCategory } from '@/types/memory';
 
-export const PIN_BITMAP_PLACEHOLDER_KEY = 'placeholder:v2';
-const PIN_BITMAP_VERSION = 'v2';
+export const PIN_BITMAP_PLACEHOLDER_KEY = 'placeholder:v3';
+const PIN_BITMAP_VERSION = 'v3';
 
 export type PinBitmapInput = {
     memoryId: string;
@@ -11,6 +11,8 @@ export type PinBitmapInput = {
     variant: 'owned' | 'shared';
     selected: boolean;
     video: boolean;
+    /** Full-size photo used on the second attempt when the thumb fails. Not part of the key. */
+    fallbackImageUri: string;
 };
 
 export type ClusterBitmapInput = {
@@ -19,6 +21,7 @@ export type ClusterBitmapInput = {
     frame: 'owned' | 'shared';
     ring: 'owned' | 'shared' | 'mixed' | 'video';
     variant: 'owned' | 'shared';
+    fallbackImageUri: string;
 };
 
 /** Displayed count, so 100 and 240 share the 99+ bitmap. */

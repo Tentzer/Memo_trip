@@ -1,7 +1,9 @@
 import { describe, expect, it } from '@jest/globals';
 import {
+    PIN_BITMAP_CAPTURE_ATTEMPTS,
     PIN_BITMAP_POINT_HEIGHT,
     PIN_BITMAP_POINT_WIDTH,
+    decidePinCapture,
     markerPointSizeForBitmap,
     pinBitmapCaptureSize,
     pinBitmapPixelSize,
@@ -22,6 +24,33 @@ describe('pin bitmap capture size', () => {
 
         const displayed = markerPointSizeForBitmap(pixels.width, pixels.height, 3);
         expect(displayed).toEqual({ width: 72, height: 86 });
+    });
+
+    it('retries a missed photo once, then captures the ring without it', () => {
+        expect(decidePinCapture({
+            attempt: 1,
+            maxAttempts: PIN_BITMAP_CAPTURE_ATTEMPTS,
+            photoLoaded: false,
+            hasPhoto: true,
+        })).toBe('retry');
+        expect(decidePinCapture({
+            attempt: 2,
+            maxAttempts: PIN_BITMAP_CAPTURE_ATTEMPTS,
+            photoLoaded: false,
+            hasPhoto: true,
+        })).toBe('capture-fallback');
+        expect(decidePinCapture({
+            attempt: 1,
+            maxAttempts: PIN_BITMAP_CAPTURE_ATTEMPTS,
+            photoLoaded: true,
+            hasPhoto: true,
+        })).toBe('capture');
+        expect(decidePinCapture({
+            attempt: 1,
+            maxAttempts: PIN_BITMAP_CAPTURE_ATTEMPTS,
+            photoLoaded: false,
+            hasPhoto: false,
+        })).toBe('capture');
     });
 
     it('does not multiply the capture options by the screen scale', () => {
