@@ -1,21 +1,32 @@
-import { cachedMarkerCoordinate } from '@/lib/markerPinProps';
-import { pinImageUri, type MapPinCluster } from '@/lib/mapMemoryPins';
-import { categoryBadgeForMapMarker } from '@/lib/markerCategoryBadge';
-import { PIN_BITMAP_POINT_HEIGHT, PIN_BITMAP_POINT_WIDTH } from '@/lib/pinBitmapCapture';
-import { bitmapUriForMarker, peekPinBitmap } from '@/lib/pinBitmapCache';
 import {
-    bitmapKeyForSpec,
-    type BitmapSpec,
-    type ClusterBitmapInput,
-    type PinBitmapInput,
-} from '@/lib/pinBitmapKey';
-import { requestPinBitmap } from '@/lib/pinBitmapQueue';
-import type { Memory } from '@/types/memory';
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+    IG_GRADIENT,
+    MIXED_PIN_GRADIENT,
+    OWNED_PIN_COLOR,
+    SHARED_PIN_COLOR,
+    markerStyles,
+} from '@/components/map/markerStyles';
+import { PlaceCategoryIcon } from '@/components/PlaceCategoryIcon';
+import { useMarkerImageSnapshot, type MarkerImagePhase } from '@/components/map/useMarkerImageSnapshot';
+import { useAppTheme } from '@/context/ThemeContext';
+import { categoryBadgeForMapMarker, pinPlaceholderAppearance } from '@/lib/markerCategoryBadge';
+import { ensureMarkerIconFonts } from '@/lib/markerIconFonts';
+import { cachedMarkerCoordinate } from '@/lib/markerPinProps';
+import { formatClusterCount, pinImageUri, type MapPinCluster } from '@/lib/mapMemoryPins';
+import type { Memory, MemoryPlaceCategory } from '@/types/memory';
+import { Ionicons } from '@expo/vector-icons';
+import { Image as ExpoImage } from 'expo-image';
+import { LinearGradient } from 'expo-linear-gradient';
+import React from 'react';
+import { StyleSheet, Text, View } from 'react-native';
 import { Marker } from 'react-native-maps';
 
+void ensureMarkerIconFonts();
+
 const MARKER_ANCHOR = { x: 0.5, y: 1 };
-const MARKER_LAYOUT = { width: PIN_BITMAP_POINT_WIDTH, height: PIN_BITMAP_POINT_HEIGHT };
+const MARKER_CENTER_OFFSET = { x: 0, y: 0 };
+
+type PinFrame = 'owned' | 'shared';
+type PinRing = 'owned' | 'shared' | 'mixed' | 'video';
 
 type MapMemoryMarkerProps = {
     memory: Memory;
@@ -28,79 +39,168 @@ type MapClusterMarkerProps = {
     onPress: (cluster: MapPinCluster) => void;
 };
 
-function useBitmapUri(spec: BitmapSpec): string {
-    const key = bitmapKeyForSpec(spec);
-    const specRef = useRef(spec);
-    specRef.current = spec;
-    const [uri, setUri] = useState(() => bitmapUriForMarker(key));
-    useEffect(() => {
-        const cached = peekPinBitmap(key);
-        if (cached) {
-            setUri(cached);
-            return undefined;
-        }
-        let cancelled = false;
-        void requestPinBitmap(specRef.current).then((next) => {
-            if (!cancelled) setUri(next);
-        });
-        return () => {
-            cancelled = true;
-        };
-    }, [key]);
-    return uri;
+function stemColor(variant: 'owned' | 'shared', videoImport: boolean): string {
+    if (videoImport) return '#ee2a7b';
+    return variant === 'owned' ? OWNED_PIN_COLOR : SHARED_PIN_COLOR;
 }
 
-function photoFallback(memory: Memory, imageUri: string): string {
-    const full = memory.uri?.trim() ?? '';
-    return full !== imageUri ? full : '';
-}
+function PinBody({
+    imageUri,
+    phase,
+    onLoad,
+    onError,
+    frame,
+    ring,
+    stem,
+    badge,
+    category,
+    showCategoryBadge = false,
+}: {
+    imageUri: string;
+    phase: MarkerImagePhase;
+    onLoad: () => void;
+    onError: () => void;
+    frame: PinFrame;
+    ring: PinRing;
+    stem: string;
+    badge?: string;
+    category?: MemoryPlaceCategory | null;
+    showCategoryBadge?: boolean;
+}) {
+    const { theme } = useAppTheme();
+    const sharedFrame = frame === 'shared';
+    const accent = ring === 'shared' ? SHARED_PIN_COLOR : OWNED_PIN_COLOR;
+    const showPhoto = imageUri.length > 0 && phase !== 'error';
+    const showPlaceholder = phase === 'loading';
+    const placeholder = pinPlaceholderAppearance(category);
+    const face = (
+        <View style={markerStyles.markerAvatarImage}>
+            {showPlaceholder ? (
+                <View
+                    style={[
+                        StyleSheet.absoluteFill,
+                        markerStyles.markerPlaceholder,
+                        { backgroundColor: placeholder.background },
+                    ]}
+                >
+                    {category ? (
+                        <PlaceCategoryIcon category={category} size={26} color={placeholder.icon} />
+                    ) : (
+                        <Ionicons name="image-outline" size={26} color={placeholder.icon} />
+                    )}
+                </View>
+            ) : null}
+            {showPhoto ? (
+                <ExpoImage
+                    key={imageUri}
+                    recyclingKey={imageUri}
+                    source={{ uri: imageUri }}
+                    style={[markerStyles.markerPhoto, { opacity: phase === 'loaded' ? 1 : 0 }]}
+                    contentFit="cover"
+                    cachePolicy="memory-disk"
+                    allowDownscaling
+                    transition={0}
+                    onLoad={onLoad}
+                    onDisplay={onLoad}
+                    onError={onError}
+                />
+            ) : null}
+        </View>
+    );
 
-function pinSpec(memory: Memory, variant: 'owned' | 'shared'): PinBitmapInput & { kind: 'pin' } {
-    const imageUri = pinImageUri(memory);
-    return {
-        kind: 'pin',
-        memoryId: memory.id,
-        imageUri,
-        badge: categoryBadgeForMapMarker({ type: 'pin', placeCategory: memory.placeCategory }),
-        variant,
-        selected: false,
-        video: memory.source === 'video_import',
-        fallbackImageUri: photoFallback(memory, imageUri),
-    };
-}
+    const photoRing = ring === 'video' ? (
+        <LinearGradient
+            colors={IG_GRADIENT}
+            start={{ x: 0, y: 1 }}
+            end={{ x: 1, y: 0 }}
+            style={markerStyles.markerAccentRing}
+        >
+            <View style={markerStyles.markerGradientInner}>{face}</View>
+        </LinearGradient>
+    ) : ring === 'mixed' ? (
+        <LinearGradient
+            colors={MIXED_PIN_GRADIENT}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 1 }}
+            style={markerStyles.markerAccentRing}
+        >
+            <View style={markerStyles.markerGradientInner}>{face}</View>
+        </LinearGradient>
+    ) : (
+        <View style={[markerStyles.markerAccentRing, { borderColor: accent }]}>{face}</View>
+    );
 
-function clusterSpec(cluster: MapPinCluster): ClusterBitmapInput & { kind: 'cluster' } {
-    const mixed = cluster.hasOwned && cluster.hasShared;
-    const frame = !mixed && cluster.hasShared ? 'shared' : 'owned';
-    return {
-        kind: 'cluster',
-        count: cluster.count,
-        imageUri: pinImageUri(cluster.newest.memory),
-        frame,
-        ring: mixed ? 'mixed' : frame,
-        variant: cluster.newest.variant,
-        fallbackImageUri: photoFallback(cluster.newest.memory, pinImageUri(cluster.newest.memory)),
-    };
+    return (
+        <View style={markerStyles.markerPinWrapper} collapsable={false}>
+            <View
+                style={[
+                    markerStyles.markerContainer,
+                    markerStyles.markerAvatarOuter,
+                    {
+                        borderColor: sharedFrame ? SHARED_PIN_COLOR : 'transparent',
+                        borderWidth: sharedFrame ? 3 : 0,
+                        backgroundColor: sharedFrame ? theme.colors.surface : 'transparent',
+                        width: sharedFrame ? 68 : 58,
+                        height: sharedFrame ? 68 : 58,
+                        borderRadius: sharedFrame ? 34 : 29,
+                    },
+                ]}
+            >
+                {photoRing}
+            </View>
+            <View style={[markerStyles.markerStem, { backgroundColor: stem }]} />
+            {badge ? (
+                <View style={markerStyles.countBadge}>
+                    <Text allowFontScaling={false} style={markerStyles.countBadgeText}>{badge}</Text>
+                </View>
+            ) : null}
+            {showCategoryBadge && category ? (
+                <View style={markerStyles.categoryBadge}>
+                    <PlaceCategoryIcon category={category} size={15} color="#374151" />
+                </View>
+            ) : null}
+        </View>
+    );
 }
 
 function MapMemoryMarkerComponent({ memory, variant, onMarkerPress }: MapMemoryMarkerProps) {
-    const uri = useBitmapUri(pinSpec(memory, variant));
-    const image = useMemo(() => ({ uri }), [uri]);
+    const imageUri = pinImageUri(memory);
+    const category = categoryBadgeForMapMarker({ type: 'pin', placeCategory: memory.placeCategory });
+    const snapshot = useMarkerImageSnapshot(
+        imageUri,
+        category ? `${imageUri}|${category}` : imageUri,
+        category != null,
+        memory.id,
+    );
     const coordinate = cachedMarkerCoordinate(memory.id, memory.latitude, memory.longitude);
+    const videoImport = memory.source === 'video_import';
+
     return (
         <Marker
             identifier={memory.id}
             coordinate={coordinate}
-            image={image}
-            anchor={MARKER_ANCHOR}
-            tracksViewChanges={false}
-            style={MARKER_LAYOUT}
             zIndex={999}
             onPress={(event) => {
                 event.stopPropagation?.();
                 onMarkerPress(memory);
             }}
-        />
+            tracksViewChanges={snapshot.tracksViewChanges}
+            anchor={MARKER_ANCHOR}
+            centerOffset={MARKER_CENTER_OFFSET}
+            accessibilityLabel={variant === 'shared' ? 'Shared memo' : 'Your memo'}
+        >
+            <PinBody
+                imageUri={imageUri}
+                phase={snapshot.phase}
+                onLoad={snapshot.onLoad}
+                onError={snapshot.onError}
+                frame={variant}
+                ring={videoImport ? 'video' : variant}
+                stem={stemColor(variant, videoImport)}
+                category={category}
+                showCategoryBadge
+            />
+        </Marker>
     );
 }
 
@@ -119,23 +219,47 @@ function sameMemoryMarker(prev: MapMemoryMarkerProps, next: MapMemoryMarkerProps
 export const MapMemoryMarker = React.memo(MapMemoryMarkerComponent, sameMemoryMarker);
 
 function MapClusterMarkerComponent({ cluster, onPress }: MapClusterMarkerProps) {
-    const uri = useBitmapUri(clusterSpec(cluster));
-    const image = useMemo(() => ({ uri }), [uri]);
+    const imageUri = pinImageUri(cluster.newest.memory);
+    const mixed = cluster.hasOwned && cluster.hasShared;
+    const frame: PinFrame = !mixed && cluster.hasShared ? 'shared' : 'owned';
+    const ring: PinRing = mixed ? 'mixed' : frame;
+    const snapshot = useMarkerImageSnapshot(
+        imageUri,
+        `${imageUri}|${cluster.count}|${frame}|${ring}|${cluster.newest.variant}`,
+    );
     const coordinate = cachedMarkerCoordinate(cluster.id, cluster.latitude, cluster.longitude);
+    const label = mixed
+        ? `${cluster.count} memos, yours and shared`
+        : cluster.hasShared
+            ? `${cluster.count} shared memos`
+            : `${cluster.count} of your memos`;
+
     return (
         <Marker
             identifier={cluster.id}
             coordinate={coordinate}
-            image={image}
-            anchor={MARKER_ANCHOR}
-            tracksViewChanges={false}
-            style={MARKER_LAYOUT}
             zIndex={1000}
             onPress={(event) => {
                 event.stopPropagation?.();
                 onPress(cluster);
             }}
-        />
+            tracksViewChanges={snapshot.tracksViewChanges}
+            anchor={MARKER_ANCHOR}
+            centerOffset={MARKER_CENTER_OFFSET}
+            accessibilityLabel={label}
+        >
+            <PinBody
+                imageUri={imageUri}
+                phase={snapshot.phase}
+                onLoad={snapshot.onLoad}
+                onError={snapshot.onError}
+                frame={frame}
+                ring={ring}
+                stem={stemColor(cluster.newest.variant, false)}
+                badge={formatClusterCount(cluster.count)}
+                category={cluster.newest.memory.placeCategory ?? null}
+            />
+        </Marker>
     );
 }
 
@@ -150,7 +274,8 @@ function sameCluster(prev: MapClusterMarkerProps, next: MapClusterMarkerProps): 
         && prev.cluster.newest.variant === next.cluster.newest.variant
         && prev.cluster.newest.memory.id === next.cluster.newest.memory.id
         && prev.cluster.newest.memory.uri === next.cluster.newest.memory.uri
-        && prev.cluster.newest.memory.thumb_uri === next.cluster.newest.memory.thumb_uri;
+        && prev.cluster.newest.memory.thumb_uri === next.cluster.newest.memory.thumb_uri
+        && prev.cluster.newest.memory.placeCategory === next.cluster.newest.memory.placeCategory;
 }
 
 export const MapClusterMarker = React.memo(MapClusterMarkerComponent, sameCluster);

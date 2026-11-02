@@ -4,7 +4,6 @@ import HomeOverlayModals from '@/components/home/HomeOverlayModals';
 import MapLibraryFilterControl from '@/components/home/MapLibraryFilterControl';
 import { MemoriesMapLoadOverlay } from '@/components/MemoriesMapLoadOverlay';
 import MapMemoryMarkerList from '@/components/map/MapMemoryMarkerList';
-import PinBitmapHost from '@/components/map/PinBitmapHost';
 import SearchBar, { SEARCH_BAR_ROW_HEIGHT_PX } from '@/components/SearchBar';
 import { type SettingsSheetRef } from '@/components/SettingsSheet';
 import { darkMapStyle } from '@/constants/darkMapStyle';
@@ -324,7 +323,6 @@ export default function MapScreen() {
             />
 
             <View style={styles.mapShell}>
-                <PinBitmapHost />
                 {mapLocationLoading && !location ? (
                     <View style={styles.mapLocationLoading}>
                         <ActivityIndicator size="large" color={theme.colors.accent} />
@@ -368,7 +366,6 @@ export default function MapScreen() {
                                 title="Destination"
                                 description={searchQuery}
                                 pinColor="red"
-                                tracksViewChanges={false}
                                 zIndex={1}
                             />
                         ) : null}

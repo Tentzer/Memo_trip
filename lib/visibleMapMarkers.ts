@@ -9,11 +9,11 @@ import type { Region } from 'react-native-maps';
 export const MARKER_REGION_PADDING = 1;
 
 /**
- * Safety cap after clustering. Bitmap markers are childless, so this can sit
- * above the old custom-view limit. Pins inside the viewport are kept before
- * any marker that is only in the padded ring. Newcomers still mount a few per frame.
+ * Safety cap for custom Google markers. Each one is a native view.
+ * Pins inside the viewport are kept before any marker that is only in the padded ring.
+ * A fast zoom that mounts or destroys more than this in one frame crashes iOS.
  */
-export const MAX_MOUNTED_MARKERS = 96;
+export const MAX_MOUNTED_MARKERS = 32;
 
 /** How many custom markers to attach per frame after a zoom change. */
 export const MARKER_MOUNT_BATCH = 8;
