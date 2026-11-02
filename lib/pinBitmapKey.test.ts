@@ -55,7 +55,7 @@ describe('pin bitmap keys', () => {
         );
         expect(placeholderBitmapUri()).toBe(placeholderBitmapUri());
         expect(placeholderBitmapUri().startsWith('data:image/png;base64,')).toBe(true);
-        expect(PIN_BITMAP_PLACEHOLDER_KEY).toBe('placeholder:v1');
+        expect(PIN_BITMAP_PLACEHOLDER_KEY).toBe('placeholder:v2');
     });
 
     it('serves a cached png before the placeholder', () => {

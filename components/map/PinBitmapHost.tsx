@@ -1,11 +1,10 @@
 import {
-    PIN_BITMAP_HEIGHT,
-    PIN_BITMAP_WIDTH,
     PinArtwork,
     clusterArtworkProps,
     pinArtworkProps,
     placeholderArtworkProps,
 } from '@/components/map/PinVisual';
+import { pinBitmapCaptureSize, PIN_BITMAP_POINT_HEIGHT, PIN_BITMAP_POINT_WIDTH } from '@/lib/pinBitmapCapture';
 import {
     completePinBitmapJob,
     failPinBitmapJob,
@@ -15,7 +14,7 @@ import {
     type BitmapJob,
 } from '@/lib/pinBitmapQueue';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { PixelRatio, StyleSheet, View } from 'react-native';
+import { Image, StyleSheet, View, type LayoutChangeEvent } from 'react-native';
 import { captureRef } from 'react-native-view-shot';
 
 type Phase = 'loading' | 'loaded' | 'error';
@@ -25,19 +24,28 @@ function jobImageUri(job: BitmapJob): string {
     return job.spec.imageUri;
 }
 
+function nextPaint(): Promise<void> {
+    return new Promise((resolve) => {
+        requestAnimationFrame(() => resolve());
+    });
+}
+
 export default function PinBitmapHost() {
     const viewRef = useRef<View>(null);
     const [job, setJob] = useState<BitmapJob | null>(null);
     const [phase, setPhase] = useState<Phase>('error');
+    const [laidOut, setLaidOut] = useState(false);
     const capturingRef = useRef(false);
     const jobRef = useRef<BitmapJob | null>(null);
     const phaseRef = useRef<Phase>('error');
     const acceptJob = useCallback((next: BitmapJob) => {
-        const nextPhase: Phase = jobImageUri(next) ? 'loading' : 'error';
+        const uri = jobImageUri(next);
+        const nextPhase: Phase = uri ? 'loading' : 'error';
         jobRef.current = next;
         phaseRef.current = nextPhase;
         setPhase(nextPhase);
         setJob(next);
+        if (uri) void Image.prefetch(uri).catch(() => undefined);
     }, []);
 
     useEffect(() => {
@@ -46,21 +54,37 @@ export default function PinBitmapHost() {
         return () => registerPinBitmapRenderer(null);
     }, [acceptJob]);
 
+    const onFrameLayout = useCallback((event: LayoutChangeEvent) => {
+        const { width, height } = event.nativeEvent.layout;
+        setLaidOut(
+            Math.round(width) === PIN_BITMAP_POINT_WIDTH
+            && Math.round(height) === PIN_BITMAP_POINT_HEIGHT,
+        );
+    }, []);
+
     const capture = useCallback(async (current: BitmapJob) => {
         if (!viewRef.current || capturingRef.current) return;
         capturingRef.current = true;
         try {
-            const scale = PixelRatio.get();
+            await nextPaint();
+            await nextPaint();
+            if (jobRef.current !== current) return;
+            if (!viewRef.current) {
+                failPinBitmapJob(current);
+                return;
+            }
+            const size = pinBitmapCaptureSize();
             const tmpUri = await captureRef(viewRef, {
                 format: 'png',
                 quality: 1,
                 result: 'tmpfile',
-                width: Math.round(PIN_BITMAP_WIDTH * scale),
-                height: Math.round(PIN_BITMAP_HEIGHT * scale),
+                width: size.width,
+                height: size.height,
             });
+            if (jobRef.current !== current) return;
             completePinBitmapJob(current, tmpUri);
         } catch {
-            failPinBitmapJob(current);
+            if (jobRef.current === current) failPinBitmapJob(current);
         } finally {
             capturingRef.current = false;
             const latest = jobRef.current;
@@ -71,12 +95,10 @@ export default function PinBitmapHost() {
     }, []);
 
     useEffect(() => {
-        if (!job || phase === 'loading') return undefined;
-        const frame = requestAnimationFrame(() => {
-            void capture(job);
-        });
-        return () => cancelAnimationFrame(frame);
-    }, [capture, job, phase]);
+        if (!job || !laidOut || phase === 'loading') return undefined;
+        void capture(job);
+        return undefined;
+    }, [capture, job, laidOut, phase]);
 
     const onLoad = useCallback(() => {
         phaseRef.current = 'loaded';
@@ -90,7 +112,7 @@ export default function PinBitmapHost() {
 
     return (
         <View pointerEvents="none" style={styles.host}>
-            <View ref={viewRef} collapsable={false} style={styles.frame}>
+            <View ref={viewRef} collapsable={false} onLayout={onFrameLayout} style={styles.frame}>
                 {artwork}
             </View>
         </View>
@@ -106,13 +128,13 @@ function artworkForJob(job: BitmapJob, phase: Phase, onLoad: () => void, onError
 const styles = StyleSheet.create({
     host: {
         position: 'absolute',
-        left: -PIN_BITMAP_WIDTH * 4,
+        left: -PIN_BITMAP_POINT_WIDTH * 4,
         top: 0,
-        width: PIN_BITMAP_WIDTH,
-        height: PIN_BITMAP_HEIGHT,
+        width: PIN_BITMAP_POINT_WIDTH,
+        height: PIN_BITMAP_POINT_HEIGHT,
     },
     frame: {
-        width: PIN_BITMAP_WIDTH,
-        height: PIN_BITMAP_HEIGHT,
+        width: PIN_BITMAP_POINT_WIDTH,
+        height: PIN_BITMAP_POINT_HEIGHT,
     },
 });

@@ -1,6 +1,7 @@
 import { cachedMarkerCoordinate } from '@/lib/markerPinProps';
 import { pinImageUri, type MapPinCluster } from '@/lib/mapMemoryPins';
 import { categoryBadgeForMapMarker } from '@/lib/markerCategoryBadge';
+import { PIN_BITMAP_POINT_HEIGHT, PIN_BITMAP_POINT_WIDTH } from '@/lib/pinBitmapCapture';
 import { bitmapUriForMarker, peekPinBitmap } from '@/lib/pinBitmapCache';
 import {
     bitmapKeyForSpec,
@@ -14,6 +15,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { Marker } from 'react-native-maps';
 
 const MARKER_ANCHOR = { x: 0.5, y: 1 };
+const MARKER_LAYOUT = { width: PIN_BITMAP_POINT_WIDTH, height: PIN_BITMAP_POINT_HEIGHT };
 
 type MapMemoryMarkerProps = {
     memory: Memory;
@@ -83,6 +85,7 @@ function MapMemoryMarkerComponent({ memory, variant, onMarkerPress }: MapMemoryM
             image={{ uri }}
             anchor={MARKER_ANCHOR}
             tracksViewChanges={false}
+            style={MARKER_LAYOUT}
             zIndex={999}
             onPress={(event) => {
                 event.stopPropagation?.();
@@ -116,6 +119,7 @@ function MapClusterMarkerComponent({ cluster, onPress }: MapClusterMarkerProps) 
             image={{ uri }}
             anchor={MARKER_ANCHOR}
             tracksViewChanges={false}
+            style={MARKER_LAYOUT}
             zIndex={1000}
             onPress={(event) => {
                 event.stopPropagation?.();

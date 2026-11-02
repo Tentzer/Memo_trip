@@ -13,15 +13,11 @@ import { formatClusterCount } from '@/lib/mapMemoryPins';
 import type { ClusterBitmapInput, PinBitmapInput } from '@/lib/pinBitmapKey';
 import type { MemoryPlaceCategory } from '@/types/memory';
 import { Ionicons } from '@expo/vector-icons';
-import { Image as ExpoImage } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
 import React from 'react';
-import { StyleSheet, Text, View } from 'react-native';
+import { Image, StyleSheet, Text, View } from 'react-native';
 
 void ensureMarkerIconFonts();
-
-export const PIN_BITMAP_WIDTH = 72;
-export const PIN_BITMAP_HEIGHT = 86;
 
 type PinPhase = 'loading' | 'loaded' | 'error';
 
@@ -59,7 +55,7 @@ export function PinArtwork({
     const sharedFrame = frame === 'shared';
     const accent = ring === 'shared' ? SHARED_PIN_COLOR : OWNED_PIN_COLOR;
     const showPhoto = imageUri.length > 0 && phase !== 'error';
-    const showPlaceholder = phase === 'loading';
+    const showPlaceholder = !showPhoto;
     const placeholder = pinPlaceholderAppearance(category);
     const face = (
         <View style={markerStyles.markerAvatarImage}>
@@ -79,17 +75,13 @@ export function PinArtwork({
                 </View>
             ) : null}
             {showPhoto ? (
-                <ExpoImage
+                <Image
                     key={imageUri}
-                    recyclingKey={imageUri}
                     source={{ uri: imageUri }}
-                    style={[markerStyles.markerPhoto, { opacity: phase === 'loaded' ? 1 : 0 }]}
-                    contentFit="cover"
-                    cachePolicy="memory-disk"
-                    allowDownscaling
-                    transition={0}
+                    style={markerStyles.markerPhoto}
+                    resizeMode="cover"
+                    fadeDuration={0}
                     onLoad={onLoad}
-                    onDisplay={onLoad}
                     onError={onError}
                 />
             ) : null}

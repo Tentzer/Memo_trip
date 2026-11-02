@@ -1,7 +1,8 @@
 import { formatClusterCount } from '@/lib/mapMemoryPins';
 import type { MemoryPlaceCategory } from '@/types/memory';
 
-export const PIN_BITMAP_PLACEHOLDER_KEY = 'placeholder:v1';
+export const PIN_BITMAP_PLACEHOLDER_KEY = 'placeholder:v2';
+const PIN_BITMAP_VERSION = 'v2';
 
 export type PinBitmapInput = {
     memoryId: string;
@@ -28,6 +29,7 @@ export function clusterCountBucket(count: number): string {
 export function pinBitmapKey(input: PinBitmapInput): string {
     return [
         'pin',
+        PIN_BITMAP_VERSION,
         input.memoryId,
         input.imageUri,
         input.badge ?? 'none',
@@ -40,6 +42,7 @@ export function pinBitmapKey(input: PinBitmapInput): string {
 export function clusterBitmapKey(input: ClusterBitmapInput): string {
     return [
         'cluster',
+        PIN_BITMAP_VERSION,
         clusterCountBucket(input.count),
         input.frame,
         input.ring,
