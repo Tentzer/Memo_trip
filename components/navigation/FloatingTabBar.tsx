@@ -26,9 +26,14 @@ export default function FloatingTabBar({ state, descriptors, navigation, insets 
     const barStyle = useAnimatedStyle(() => {
         const travel = Math.max(sheetTravel.value, 1);
         return {
-            opacity: interpolate(sheetTranslateY.value, [0, travel], [0, 1], Extrapolation.CLAMP),
+            opacity: interpolate(sheetTranslateY.value, [0, Math.min(travel, 240)], [0, 1], Extrapolation.CLAMP),
             transform: [{
-                translateY: interpolate(sheetTranslateY.value, [0, travel], [PILL_HEIGHT + 12, 0], Extrapolation.CLAMP),
+                translateY: interpolate(
+                    sheetTranslateY.value,
+                    [0, Math.min(travel, 240)],
+                    [PILL_HEIGHT + 12, 0],
+                    Extrapolation.CLAMP,
+                ),
             }],
         };
     });
@@ -68,6 +73,10 @@ export default function FloatingTabBar({ state, descriptors, navigation, insets 
                                 target: route.key,
                                 canPreventDefault: true,
                             });
+                            if (route.name === 'libraries') {
+                                navigation.navigate('Home');
+                                return;
+                            }
                             if (!focused && !event.defaultPrevented) {
                                 navigation.navigate(route.name, route.params);
                             }

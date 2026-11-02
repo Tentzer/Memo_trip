@@ -3,11 +3,10 @@ import { LibrariesOverlayProvider, useLibrariesOverlay } from '@/context/Librari
 import { useMemories } from '@/context/MemoryContext';
 import { AntDesign, Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
-import { Tabs, useRouter } from 'expo-router';
+import { Tabs } from 'expo-router';
 
 function OnboardingTabs() {
     const { addMemory } = useMemories();
-    const router = useRouter();
     const { open: openLibrariesOverlay } = useLibrariesOverlay();
 
     return (
@@ -15,6 +14,7 @@ function OnboardingTabs() {
             tabBar={(props) => <FloatingTabBar {...props} />}
             screenOptions={{
                 headerShown: false,
+                animation: 'none',
                 tabBarStyle: {
                     position: 'absolute',
                     backgroundColor: 'transparent',
@@ -64,7 +64,6 @@ function OnboardingTabs() {
                 listeners={{
                     tabPress: (e) => {
                         e.preventDefault();
-                        router.replace('/onboarding/Home');
                         openLibrariesOverlay();
                     },
                 }}

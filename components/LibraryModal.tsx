@@ -304,8 +304,11 @@ export default function LibraryModal({
     const librarySegmentIndicatorStyle = useAnimatedStyle(() => ({
         transform: [{ translateX: segment.value * LIBRARY_SEGMENT_WIDTH }],
     }));
-    const libraryPagerStyle = useAnimatedStyle(() => ({
-        transform: [{ translateX: -segment.value * windowWidth }],
+    const countriesPageStyle = useAnimatedStyle(() => ({
+        opacity: 1 - segment.value,
+    }));
+    const privatePageStyle = useAnimatedStyle(() => ({
+        opacity: segment.value,
     }));
 
     useEffect(() => {
@@ -1459,8 +1462,10 @@ export default function LibraryModal({
                 {/* Body */}
                 {!selectedFolder ? (
                     <View style={styles.libraryListContainer}>
-                        <Reanimated.View style={[styles.libraryPager, { width: windowWidth * 2 }, libraryPagerStyle]}>
-                        <View style={{ width: windowWidth, flex: 1 }}>
+                        <Reanimated.View
+                            pointerEvents={activeVariant === 'countries' ? 'auto' : 'none'}
+                            style={[styles.libraryPage, countriesPageStyle]}
+                        >
                         <FlatList
                             data={countryFolders}
                             numColumns={2}
@@ -1469,14 +1474,17 @@ export default function LibraryModal({
                             initialNumToRender={6}
                             maxToRenderPerBatch={8}
                             windowSize={5}
-                            removeClippedSubviews
+                            removeClippedSubviews={false}
                             getItemLayout={getFolderItemLayout}
                             contentContainerStyle={folderListContentStyle}
                             ListEmptyComponent={countriesEmpty}
                             renderItem={renderFolderCard}
                         />
-                        </View>
-                        <View style={{ width: windowWidth, flex: 1 }}>
+                        </Reanimated.View>
+                        <Reanimated.View
+                            pointerEvents={activeVariant === 'custom' ? 'auto' : 'none'}
+                            style={[styles.libraryPage, privatePageStyle]}
+                        >
                         <FlatList
                             data={customLibraryFolders}
                             numColumns={2}
@@ -1485,14 +1493,13 @@ export default function LibraryModal({
                             initialNumToRender={6}
                             maxToRenderPerBatch={8}
                             windowSize={5}
-                            removeClippedSubviews
+                            removeClippedSubviews={false}
                             getItemLayout={getFolderItemLayout}
                             contentContainerStyle={folderListContentStyle}
                             ListHeaderComponent={privateListHeader}
                             ListEmptyComponent={privateEmpty}
                             renderItem={renderFolderCard}
                         />
-                        </View>
                         </Reanimated.View>
                     </View>
                 ) : (
@@ -1966,9 +1973,8 @@ const createStyles = (colors: ThemeColors) => StyleSheet.create({
         flex: 1,
         overflow: 'hidden',
     },
-    libraryPager: {
-        flexDirection: 'row',
-        flex: 1,
+    libraryPage: {
+        ...StyleSheet.absoluteFillObject,
     },
     createFolderActions: {
         flexDirection: 'row',
