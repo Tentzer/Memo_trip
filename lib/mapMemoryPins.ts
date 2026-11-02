@@ -68,8 +68,9 @@ export function zoomBucketFromLongitudeDelta(longitudeDelta: number): number {
 /**
  * Camera-idle callbacks arrive in a burst while a pinch decelerates.
  * Wait until that burst stops before swapping the marker tree.
+ * 200ms still committed mid-zoom on device and the native map crashed.
  */
-export const CLUSTER_ZOOM_SETTLE_MS = 200;
+export const CLUSTER_ZOOM_SETTLE_MS = 450;
 
 /** Stay on the current bucket when zoom only jitters across a rounding boundary. */
 export const CLUSTER_ZOOM_BUCKET_MARGIN = 0.12;

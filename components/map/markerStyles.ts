@@ -50,6 +50,13 @@ export const markerStyles = StyleSheet.create({
         borderRadius: 29,
         backgroundColor: 'transparent',
     },
+    markerPhoto: {
+        position: 'absolute',
+        top: 0,
+        left: 0,
+        width: 58,
+        height: 58,
+    },
     markerPlaceholder: {
         backgroundColor: '#e2e8f0',
         alignItems: 'center',

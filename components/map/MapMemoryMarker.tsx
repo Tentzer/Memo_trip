@@ -70,11 +70,13 @@ function PinBody({
                     key={imageUri}
                     recyclingKey={imageUri}
                     source={{ uri: imageUri }}
-                    style={[StyleSheet.absoluteFill, { opacity: phase === 'loaded' ? 1 : 0 }]}
+                    style={[markerStyles.markerPhoto, { opacity: phase === 'loaded' ? 1 : 0 }]}
                     contentFit="cover"
                     cachePolicy="memory-disk"
+                    allowDownscaling
                     transition={0}
                     onLoad={onLoad}
+                    onDisplay={onLoad}
                     onError={onError}
                 />
             ) : null}
@@ -181,11 +183,9 @@ function MapClusterMarkerComponent({ cluster, onPress }: MapClusterMarkerProps) 
     const mixed = cluster.hasOwned && cluster.hasShared;
     const frame: PinFrame = !mixed && cluster.hasShared ? 'shared' : 'owned';
     const ring: PinRing = mixed ? 'mixed' : frame;
-    // Snapshot once when the photo is ready. Tracking through the decode freezes the map.
     const snapshot = useMarkerImageSnapshot(
         imageUri,
         `${imageUri}|${cluster.count}|${frame}|${ring}|${cluster.newest.variant}`,
-        false,
     );
     const label = mixed
         ? `${cluster.count} memos, yours and shared`
