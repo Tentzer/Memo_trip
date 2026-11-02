@@ -28,6 +28,7 @@ interface MemoryContextType {
             source?: 'video_import';
             sourceUrl?: string;
             placeCategory?: MemoryPlaceCategory;
+            placePhotoRefs?: string[] | null;
         }
     ) => Promise<void>;
     deleteMemory: (id: string) => void;

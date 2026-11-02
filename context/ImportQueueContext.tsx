@@ -51,6 +51,7 @@ export interface ResolvedPlaceData {
     lat: number;
     lng: number;
     photoReference: string | null;
+    photoReferences: string[];
     photoUri: string;
     country: string | null;
 }
@@ -238,6 +239,7 @@ export function ImportQueueProvider({ children }: { children: React.ReactNode })
                                     lat: details.latitude,
                                     lng: details.longitude,
                                     photoReference: details.photoReference,
+                                    photoReferences: details.photoReferences,
                                     photoUri,
                                     country: details.country,
                                 },

@@ -8,6 +8,7 @@ import {
     saveMemoryMeta,
 } from '@/lib/memoryStorage';
 import { normalizePlaceCategory } from '@/lib/placeCategory';
+import { normalizePlacePhotoRefs } from '@/lib/placePhotoRefs';
 import { supabase } from '@/lib/supabase';
 import { CustomFolder, Memory, MemoryMeta } from '@/types/memory';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -334,6 +335,7 @@ export async function buildFormattedMemories(
                 excludeFromCountryFolder: existingMeta.excludeFromCountryFolder ?? false,
                 source,
                 sourceUrl,
+                placePhotoRefs: normalizePlacePhotoRefs(item.place_photo_refs),
             };
         })
     );
@@ -354,6 +356,7 @@ export async function uploadPicture(
         source?: Memory['source'];
         sourceUrl?: string;
         placeCategory?: Memory['placeCategory'];
+        placePhotoRefs?: string[] | null;
     }
 ): Promise<{ persistedId: string; publicUrl: string; thumbUrl: string | null } | null> {
     try {
@@ -382,6 +385,7 @@ export async function uploadPicture(
             normalizePlaceCategory(options?.placeCategory)
             ?? normalizePlaceCategory(tempMetaBefore?.placeCategory)
             ?? null;
+        const placePhotoRefs = normalizePlacePhotoRefs(options?.placePhotoRefs);
 
         const { data: insertedMemory, error: dbError } = await supabase
             .from('memories')
@@ -395,6 +399,7 @@ export async function uploadPicture(
                 source: resolvedSource,
                 source_url: resolvedSourceUrl,
                 place_category: resolvedPlaceCategory,
+                place_photo_refs: placePhotoRefs,
                 country: normalizeLocationFolderName(country),
                 formatted_address: null,
                 thumb_uri: thumbUrl,

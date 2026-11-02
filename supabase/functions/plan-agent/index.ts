@@ -109,6 +109,7 @@ interface ResolvedStop {
     lng: number;
     durationMinutes: number;
     photoReference: string | null;
+    photoReferences: string[];
     openingHours: string | null;
     country: string;
 }
@@ -125,6 +126,7 @@ interface PlanStop {
     durationMinutes: number;
     travelFromPreviousMinutes: number;
     photoReference: string | null;
+    photoReferences?: string[];
     openingHours: string | null;
     country: string;
     warnings: string[];
@@ -257,10 +259,23 @@ async function getCityName(lat: number, lng: number): Promise<string> {
     }
 }
 
+function takePlacePhotoRefs(photos: { photo_reference?: string }[] | undefined): string[] {
+    if (!Array.isArray(photos)) return [];
+    const refs: string[] = [];
+    for (const photo of photos) {
+        const ref = photo?.photo_reference?.trim();
+        if (!ref) continue;
+        refs.push(ref);
+        if (refs.length >= 5) break;
+    }
+    return refs;
+}
+
 async function getPlaceDetails(placeId: string): Promise<{
     lat: number;
     lng: number;
     photoReference: string | null;
+    photoReferences: string[];
     openingHours: string | null;
     country: string;
     formattedAddress: string;
@@ -278,7 +293,8 @@ async function getPlaceDetails(placeId: string): Promise<{
 
     const lat: number = result.geometry?.location?.lat ?? 0;
     const lng: number = result.geometry?.location?.lng ?? 0;
-    const photoReference: string | null = result.photos?.[0]?.photo_reference ?? null;
+    const photoReferences = takePlacePhotoRefs(result.photos);
+    const photoReference: string | null = photoReferences[0] ?? null;
 
     let openingHours: string | null = null;
     const weekdayText: string[] = result.opening_hours?.weekday_text ?? [];
@@ -294,7 +310,7 @@ async function getPlaceDetails(placeId: string): Promise<{
     const country = countryComp?.long_name ?? '';
     const formattedAddress = (result.formatted_address as string) ?? '';
 
-    return { lat, lng, photoReference, openingHours, country, formattedAddress };
+    return { lat, lng, photoReference, photoReferences, openingHours, country, formattedAddress };
 }
 
 async function enrichPlacesWithGemini(
@@ -402,6 +418,7 @@ async function finalizeItinerary(
             durationMinutes: stop.durationMinutes,
             travelFromPreviousMinutes: travelMinutes,
             photoReference: stop.photoReference,
+            photoReferences: stop.photoReferences,
             openingHours: stop.openingHours,
             country: stop.country,
             warnings: [],
@@ -676,6 +693,7 @@ Return JSON:
                             lat: details.lat,
                             lng: details.lng,
                             photoReference: details.photoReference,
+                            photoReferences: details.photoReferences,
                             openingHours: details.openingHours,
                             country: details.country,
                         });
@@ -695,6 +713,7 @@ Return JSON:
                             userRatingsTotal: 0,
                             placeId: found.placeId,
                             photoReference: details.photoReference,
+                            photoReferences: details.photoReferences,
                             lat: details.lat,
                             lng: details.lng,
                             country: details.country,
@@ -720,6 +739,7 @@ Return JSON:
                             lat: details.lat,
                             lng: details.lng,
                             photoReference: details.photoReference,
+                            photoReferences: details.photoReferences,
                             openingHours: details.openingHours,
                             country: details.country,
                         });
@@ -831,6 +851,7 @@ Rules:
                 lat: details.lat,
                 lng: details.lng,
                 photoReference: details.photoReference,
+                photoReferences: details.photoReferences,
                 openingHours: details.openingHours,
                 country: details.country,
             });

@@ -1,3 +1,4 @@
+import MemoPhotoGallery from '@/components/MemoPhotoGallery';
 import { type Memory } from '@/context/MemoryContext';
 import { useAppTheme } from '@/context/ThemeContext';
 import {
@@ -6,7 +7,6 @@ import {
 } from '@/lib/geocoding';
 import { Ionicons } from '@expo/vector-icons';
 import { GoogleWord } from '@/components/GoogleWord';
-import { Image as ExpoImage } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
@@ -236,12 +236,11 @@ export default function MemoInfoModal({
                         keyboardShouldPersistTaps="handled"
                         showsVerticalScrollIndicator={false}
                     >
-                        {memory ? (
-                            <ExpoImage
-                                source={{ uri: memory.uri }}
-                                style={styles.heroImage}
-                                contentFit="cover"
-                                transition={200}
+                        {memory?.uri ? (
+                            <MemoPhotoGallery
+                                storedUri={memory.uri}
+                                placePhotoRefs={memory.placePhotoRefs}
+                                googleApiKey={process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY}
                             />
                         ) : null}
 
@@ -468,13 +467,6 @@ const createStyles = (colors: ThemeColors) => StyleSheet.create({
     },
     scrollContent: {
         paddingBottom: 12,
-    },
-    heroImage: {
-        width: '100%',
-        height: 200,
-        borderRadius: 16,
-        backgroundColor: colors.surfaceMuted,
-        marginBottom: 16,
     },
     block: {
         marginBottom: 18,

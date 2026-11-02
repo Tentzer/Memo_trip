@@ -36,7 +36,7 @@ export const useMapLogic = (
         country: string,
         description?: string,
         title?: string,
-        options?: { customFolderIds?: string[] }
+        options?: { customFolderIds?: string[]; placePhotoRefs?: string[] | null }
     ) => Promise<void>,
     onMarkerActionPress?: (memory: Memory) => void
 ) => {
@@ -107,6 +107,7 @@ export const useMapLogic = (
     const [memoryToShare, setMemoryToShare] = useState<Memory | null>(null);
     const [shareRecipient, setShareRecipient] = useState('');
     const [selectedPlacePhotoRef, setSelectedPlacePhotoRef] = useState<string | null>(null);
+    const [selectedPlacePhotoRefs, setSelectedPlacePhotoRefs] = useState<string[]>([]);
     const [selectedPlaceCountry, setSelectedPlaceCountry] = useState<string | null>(null);
     const [isAddingPlace, setIsAddingPlace] = useState(false);
     const [isNoPhotoDescriptionVisible, setIsNoPhotoDescriptionVisible] = useState(false);
@@ -172,6 +173,7 @@ export const useMapLogic = (
         setSearchQuery(text);
         setUserChoseAddress(false);
         setSelectedPlacePhotoRef(null);
+        setSelectedPlacePhotoRefs([]);
         setSelectedPlaceCountry(null);
         if (text.length < 3) {
             setSearchResults([]);
@@ -191,6 +193,7 @@ export const useMapLogic = (
         if (place) {
             setSelectedPlaceTitle(place.title);
             setSelectedPlacePhotoRef(place.photoReference);
+            setSelectedPlacePhotoRefs(place.photoReferences);
             setSelectedPlaceCountry(place.country);
             setShowRoute(false);
             setDestinationLatitude(place.latitude);
@@ -292,6 +295,7 @@ export const useMapLogic = (
         setSearchResults([]);
         setUserChoseAddress(false);
         setSelectedPlacePhotoRef(null);
+        setSelectedPlacePhotoRefs([]);
         setSelectedPlaceCountry(null);
         setIsNoPhotoDescriptionVisible(false);
         setMissingPhotoDescription('');
@@ -323,7 +327,9 @@ export const useMapLogic = (
 
         setIsAddingPlace(true);
         try {
-            await addPlaceMemory(photoUri, lat, lng, country, description, title);
+            await addPlaceMemory(photoUri, lat, lng, country, description, title, {
+                placePhotoRefs: selectedPlacePhotoRefs,
+            });
             handleClearSearch();
         } catch {
             Alert.alert('Error', 'Could not save the memory. Please try again.');
@@ -333,6 +339,7 @@ export const useMapLogic = (
     }, [
         user,
         selectedPlacePhotoRef,
+        selectedPlacePhotoRefs,
         selectedPlaceCountry,
         destinationLatitude,
         destinationLongitude,

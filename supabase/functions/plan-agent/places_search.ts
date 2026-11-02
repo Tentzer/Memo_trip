@@ -13,13 +13,18 @@ function mapGoogleResultToRecommended(r: Record<string, unknown>): RecommendedPl
     const name = r.name as string | undefined;
     if (!placeId?.trim() || !name?.trim()) return null;
     const photos = r.photos as Record<string, unknown>[] | undefined;
+    const photoReferences = (photos ?? [])
+        .map((photo) => (typeof photo.photo_reference === 'string' ? photo.photo_reference.trim() : ''))
+        .filter((ref) => ref.length > 0)
+        .slice(0, 5);
     return {
         name,
         address: (r.formatted_address ?? r.vicinity ?? '') as string,
         rating: (r.rating ?? 0) as number,
         userRatingsTotal: (r.user_ratings_total ?? 0) as number,
         placeId,
-        photoReference: (photos?.[0]?.photo_reference as string | undefined) ?? null,
+        photoReference: photoReferences[0] ?? null,
+        photoReferences,
         lat,
         lng,
         country: '',

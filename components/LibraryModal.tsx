@@ -97,7 +97,7 @@ interface Props {
         country: string,
         description?: string,
         title?: string,
-        options?: { customFolderIds?: string[] }
+        options?: { customFolderIds?: string[]; placePhotoRefs?: string[] | null }
     ) => Promise<void>;
     toggleMemoryInCustomFolder: (memoryId: string, folderId: string) => Promise<void>;
     addMemoriesToCustomFolder: (
@@ -653,7 +653,7 @@ export default function LibraryModal({
                 selectedLibraryPlace.country ?? '',
                 undefined,
                 selectedLibraryPlace.title,
-                { customFolderIds: [selectedFolder.id] }
+                { customFolderIds: [selectedFolder.id], placePhotoRefs: selectedLibraryPlace.photoReferences }
             );
             Alert.alert('Place added', `${selectedLibraryPlace.title.split(',')[0].trim()} was added to ${selectedFolder.name}.`);
             clearLibraryPlaceSearch();
