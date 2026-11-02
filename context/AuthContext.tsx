@@ -1,3 +1,4 @@
+import { clearMemoriesSnapshot } from '@/lib/memoriesSnapshot';
 import { setShareExtensionAccessToken } from '@/lib/shareExtensionAuthSync';
 import { supabase } from '@/lib/supabase';
 import { Session, User } from '@supabase/supabase-js';
@@ -38,6 +39,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }, []);
 
     const logout = async () => {
+        const userId = user?.id;
+        if (userId) {
+            await clearMemoriesSnapshot(userId);
+        }
         setUser(null);
         setSession(null);
         setShareExtensionAccessToken(null);
