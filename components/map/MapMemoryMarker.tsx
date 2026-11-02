@@ -11,7 +11,8 @@ import { useAppTheme } from '@/context/ThemeContext';
 import { categoryBadgeForMapMarker, pinPlaceholderAppearance } from '@/lib/markerCategoryBadge';
 import { ensureMarkerIconFonts } from '@/lib/markerIconFonts';
 import { cachedMarkerCoordinate } from '@/lib/markerPinProps';
-import { formatClusterCount, pinImageUri, type MapPinCluster } from '@/lib/mapMemoryPins';
+import { useResolvedPinImage } from '@/hooks/useResolvedPinImage';
+import { formatClusterCount, type MapPinCluster } from '@/lib/mapMemoryPins';
 import type { Memory, MemoryPlaceCategory } from '@/types/memory';
 import { Ionicons } from '@expo/vector-icons';
 import { Image as ExpoImage } from 'expo-image';
@@ -71,7 +72,7 @@ function PinBody({
     const sharedFrame = frame === 'shared';
     const accent = ring === 'shared' ? SHARED_PIN_COLOR : OWNED_PIN_COLOR;
     const showPhoto = imageUri.length > 0 && phase !== 'error';
-    const showPlaceholder = phase === 'loading';
+    const showPlaceholder = !showPhoto;
     const placeholder = pinPlaceholderAppearance(category);
     const face = (
         <View style={markerStyles.markerAvatarImage}>
@@ -164,7 +165,7 @@ function PinBody({
 }
 
 function MapMemoryMarkerComponent({ memory, variant, onMarkerPress }: MapMemoryMarkerProps) {
-    const imageUri = pinImageUri(memory);
+    const imageUri = useResolvedPinImage(memory);
     const category = categoryBadgeForMapMarker({ type: 'pin', placeCategory: memory.placeCategory });
     const snapshot = useMarkerImageSnapshot(
         imageUri,
@@ -219,7 +220,7 @@ function sameMemoryMarker(prev: MapMemoryMarkerProps, next: MapMemoryMarkerProps
 export const MapMemoryMarker = React.memo(MapMemoryMarkerComponent, sameMemoryMarker);
 
 function MapClusterMarkerComponent({ cluster, onPress }: MapClusterMarkerProps) {
-    const imageUri = pinImageUri(cluster.newest.memory);
+    const imageUri = useResolvedPinImage(cluster.newest.memory);
     const mixed = cluster.hasOwned && cluster.hasShared;
     const frame: PinFrame = !mixed && cluster.hasShared ? 'shared' : 'owned';
     const ring: PinRing = mixed ? 'mixed' : frame;

@@ -29,6 +29,8 @@ export interface Memory {
     excludeFromCountryFolder?: boolean;
     source?: 'video_import';
     sourceUrl?: string;
+    /** Brave `loc…` id or a Google place id, when this memo was saved from search. */
+    placeId?: string;
 }
 
 export interface CustomFolder {

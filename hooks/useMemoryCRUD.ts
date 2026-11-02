@@ -25,6 +25,7 @@ interface AddPlaceMemoryOptions {
     source?: 'video_import';
     sourceUrl?: string;
     placeCategory?: Memory['placeCategory'];
+    placeId?: string;
 }
 
 export function useMemoryCRUD({
@@ -127,6 +128,7 @@ export function useMemoryCRUD({
             title: trimmedTitle || undefined,
             description: trimmedDescription || undefined,
             placeCategory,
+            placeId: options?.placeId,
             customFolderIds,
             source,
             sourceUrl,
@@ -216,6 +218,7 @@ export function useMemoryCRUD({
                         thumb_uri: result.thumbUrl,
                         customFolderIds: persistedFolderIds,
                         placeCategory,
+                        placeId: options?.placeId,
                     }
                     : m
             ));

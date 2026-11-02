@@ -1,4 +1,5 @@
 import { UNKNOWN_COUNTRY_FOLDER } from '@/lib/countryFolder';
+import { isPlaceholderPhoto } from '@/lib/places/saveSearchedPlace';
 import type { Memory } from '@/types/memory';
 
 export type MapPinVariant = 'owned' | 'shared';
@@ -52,9 +53,11 @@ export function isValidMapCoordinate(latitude: number, longitude: number): boole
 }
 
 export function pinImageUri(memory: Pick<Memory, 'uri' | 'thumb_uri'>): string {
-    const thumb = memory.thumb_uri?.trim();
-    if (thumb) return thumb;
-    return memory.uri?.trim() ?? '';
+    const thumb = memory.thumb_uri?.trim() ?? '';
+    if (thumb && !isPlaceholderPhoto(thumb)) return thumb;
+    const full = memory.uri?.trim() ?? '';
+    if (full && !isPlaceholderPhoto(full)) return full;
+    return '';
 }
 
 export function formatClusterCount(count: number): string {

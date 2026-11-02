@@ -141,6 +141,12 @@ describe('map pin images and coordinates', () => {
         expect(pinImageUri(memory('a', { thumb_uri: '   ' }))).toBe('https://example.com/a.jpg');
         expect(pinImageUri(memory('a'))).toBe('https://example.com/a.jpg');
         expect(pinImageUri({ uri: '   ', thumb_uri: '' })).toBe('');
+        const placeholder = 'https://placehold.co/400x400/e2e8f0/94a3b8.png?text=?';
+        expect(pinImageUri(memory('a', { uri: placeholder, thumb_uri: placeholder }))).toBe('');
+        expect(pinImageUri(memory('a', {
+            uri: 'https://imgs.search.brave.com/cover',
+            thumb_uri: placeholder,
+        }))).toBe('https://imgs.search.brave.com/cover');
     });
 
     it('rejects coordinates that cannot be drawn', () => {

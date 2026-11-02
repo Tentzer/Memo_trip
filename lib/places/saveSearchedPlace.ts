@@ -66,7 +66,7 @@ export interface SaveSearchedPlaceInput {
         country: string,
         description?: string,
         title?: string,
-        options?: { placeCategory?: MemoryPlaceCategory },
+        options?: { placeCategory?: MemoryPlaceCategory; placeId?: string },
     ) => Promise<void>;
     fetchPhotoUris?: (prediction: PlacePrediction) => Promise<string[]>;
 }
@@ -87,7 +87,7 @@ export async function saveSearchedPlace(input: SaveSearchedPlaceInput): Promise<
         input.country ?? '',
         input.description,
         selected.title,
-        { placeCategory: selected.category },
+        { placeCategory: selected.category, placeId: selected.placeId },
     );
     return { selected, photoUri };
 }

@@ -40,7 +40,7 @@ export const useMapLogic = (
         country: string,
         description?: string,
         title?: string,
-        options?: { customFolderIds?: string[]; placeCategory?: MemoryPlaceCategory }
+        options?: { customFolderIds?: string[]; placeCategory?: MemoryPlaceCategory; placeId?: string }
     ) => Promise<void>,
     onMarkerActionPress?: (memory: Memory) => void
 ) => {
@@ -425,6 +425,7 @@ export const useMapLogic = (
         try {
             await addPlaceMemory(photoUri, lat, lng, country, description, title, {
                 placeCategory: selectedPlaceCategory,
+                placeId: prediction?.place_id,
             });
             handleClearSearch();
         } catch {

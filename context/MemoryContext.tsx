@@ -3,6 +3,8 @@ import { useMemoryCRUD } from '@/hooks/useMemoryCRUD';
 import { useSharing } from '@/hooks/useSharing';
 import { loadUserMemories, type LoadedMemories } from '@/lib/memoryApi';
 import { loadMemoriesSnapshot, saveMemoriesSnapshot } from '@/lib/memoriesSnapshot';
+import { repairPlaceholderCovers } from '@/lib/repairPlaceholderCovers';
+import { supabase } from '@/lib/supabase';
 import { InviteActionResult, PendingInvite } from '@/types/invites';
 import { CustomFolder, Memory, MemoryPlaceCategory } from '@/types/memory';
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
@@ -28,6 +30,7 @@ interface MemoryContextType {
             source?: 'video_import';
             sourceUrl?: string;
             placeCategory?: MemoryPlaceCategory;
+            placeId?: string;
         }
     ) => Promise<void>;
     deleteMemory: (id: string) => void;
@@ -142,6 +145,26 @@ export function MemoryProvider({ children, ready = true }: { children: React.Rea
                     customFolders: result.customFolders,
                     sharedMap: result.sharedMap,
                 }, loadToken);
+
+                const repaired = await repairPlaceholderCovers(result.memories, {
+                    updateCover: async (memoryId, fields) => {
+                        const { error } = await supabase
+                            .from('memories')
+                            .update(fields)
+                            .eq('id', memoryId)
+                            .eq('user_id', userId);
+                        return !error;
+                    },
+                });
+                if (!repaired || cancelled) return;
+                if (activeUserIdRef.current !== userId) return;
+                if (loadToken !== loadTokenRef.current) return;
+                setMemories(repaired);
+                await saveMemoriesSnapshot(userId, {
+                    memories: repaired,
+                    customFolders: result.customFolders,
+                    sharedMap: result.sharedMap,
+                });
             })();
 
             return () => {

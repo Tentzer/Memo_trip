@@ -68,7 +68,7 @@ describe('search, select, and save a Brave place', () => {
             'Japan',
             undefined,
             'Sushi Dai',
-            { placeCategory: 'sushi' },
+            { placeCategory: 'sushi', placeId: 'loc4G4LX7WYT25AUBNMX' },
         );
         expect(invoke).toHaveBeenCalledTimes(1);
     });
@@ -92,7 +92,7 @@ describe('search, select, and save a Brave place', () => {
             '',
             undefined,
             'Quiet Park',
-            { placeCategory: undefined },
+            { placeCategory: undefined, placeId: 'locNOPHOTO' },
         );
     });
 });

@@ -1,9 +1,6 @@
-import {
-    compressLocalImageForUpload,
-    isRemoteHttpUri,
-    preparePinThumbnail,
-    remoteThumbnailFallback,
-} from '@/lib/imageCompress';
+import { compressLocalImageForUpload, preparePinThumbnail } from '@/lib/imageCompress';
+import { memoryCoverFields } from '@/lib/memoryCover';
+import { isPlaceholderPhoto } from '@/lib/places/saveSearchedPlace';
 import { uploadMemoryJpeg } from '@/lib/memoryBucket';
 import { getCountryNameFromCoords, normalizeLocationFolderName, toFolderLookupKey } from '@/lib/geocoding';
 import {
@@ -363,22 +360,27 @@ export async function uploadPicture(
 ): Promise<{ persistedId: string; publicUrl: string; thumbUrl: string | null } | null> {
     try {
         const fileName = `${tempId}.jpg`;
-        const uriForUpload = await compressLocalImageForUpload(photoUri);
-        const publicUrl = await uploadMemoryJpeg(fileName, uriForUpload);
-
+        const cover = memoryCoverFields(photoUri);
+        let publicUrl: string;
         let thumbUrl: string | null = null;
-        const remoteCover = isRemoteHttpUri(photoUri) || isRemoteHttpUri(uriForUpload);
-        try {
-            const prepared = await preparePinThumbnail(uriForUpload);
-            if ('fallbackUrl' in prepared) {
-                thumbUrl = prepared.fallbackUrl;
-            } else {
-                thumbUrl = await uploadMemoryJpeg(`thumbs/${tempId}.jpg`, prepared.uploadUri);
-            }
-        } catch (thumbError) {
-            if (remoteCover) {
-                thumbUrl = remoteThumbnailFallback(photoUri);
-            } else {
+
+        if (isPlaceholderPhoto(photoUri)) {
+            publicUrl = cover.uri;
+            thumbUrl = null;
+        } else if (cover.thumbUri) {
+            publicUrl = cover.uri;
+            thumbUrl = cover.thumbUri;
+        } else {
+            const uriForUpload = await compressLocalImageForUpload(photoUri);
+            publicUrl = await uploadMemoryJpeg(fileName, uriForUpload);
+            try {
+                const prepared = await preparePinThumbnail(uriForUpload);
+                if ('fallbackUrl' in prepared) {
+                    thumbUrl = prepared.fallbackUrl;
+                } else {
+                    thumbUrl = await uploadMemoryJpeg(`thumbs/${tempId}.jpg`, prepared.uploadUri);
+                }
+            } catch (thumbError) {
                 console.error('Pin thumbnail upload failed:', thumbError);
             }
         }

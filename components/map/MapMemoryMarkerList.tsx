@@ -1,5 +1,5 @@
 import { MapClusterMarker, MapMemoryMarker } from '@/components/map/MapMemoryMarker';
-import type { MapMarkerItem, MapPinCluster } from '@/lib/mapMemoryPins';
+import { pinImageUri, type MapMarkerItem, type MapPinCluster } from '@/lib/mapMemoryPins';
 import { markerItemKey } from '@/lib/visibleMapMarkers';
 import type { Memory } from '@/types/memory';
 import React from 'react';
@@ -16,10 +16,14 @@ function MapMemoryMarkerList({
     onClusterPress,
 }: MapMemoryMarkerListProps) {
     return items.map((item) => {
+        const image = item.type === 'cluster'
+            ? pinImageUri(item.cluster.newest.memory)
+            : pinImageUri(item.pin.memory);
+        const key = `${markerItemKey(item)}:${image}`;
         if (item.type === 'cluster') {
             return (
                 <MapClusterMarker
-                    key={markerItemKey(item)}
+                    key={key}
                     cluster={item.cluster}
                     onPress={onClusterPress}
                 />
@@ -27,7 +31,7 @@ function MapMemoryMarkerList({
         }
         return (
             <MapMemoryMarker
-                key={markerItemKey(item)}
+                key={key}
                 memory={item.pin.memory}
                 variant={item.pin.variant}
                 onMarkerPress={onMarkerPress}
